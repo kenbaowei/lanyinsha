@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>兰荫杀 - 联机测试版</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei",sans-serif;background:#f4efe6;color:#3a2f22;min-height:100vh}
+.wrap{max-width:1200px;margin:0 auto;padding:12px}
+h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
+.bar{background:#fff;border:1px solid #d8c9b0;border-radius:10px;padding:10px;margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bar input{flex:1;min-width:100px;padding:6px 8px;border:1px solid #cbb;border-radius:6px;font-size:14px}
+.btn{padding:7px 14px;border:none;border-radius:8px;cursor:pointer;font-size:14px;background:#8a5a2b;color:#fff}
+.btn:hover{background:#6e451d}
+.btn.gray{background:#9a9a9a}
+.btn.green{background:#2e7d32}
+.btn.red{background:#c62828}
+.btn.blue{background:#1565c0}
+.btn.orange{background:#ef6c00}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#players{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0}
+.ply{background:#fff;border:1px solid #d8c9b0;border-radius:10px;padding:10px;flex:1;min-width:260px}
+.ply.me{border:2px solid #c62828}
+.ply .nm{font-weight:bold;font-size:15px}
+.ply .hpwrap{height:14px;background:#eee;border-radius:7px;margin:4px 0;overflow:hidden}
+.ply .hpbar{height:100%;background:linear-gradient(90deg,#43a047,#66bb6a);transition:width .3s}
+.slot{display:inline-block;border:1px dashed #bbb;border-radius:8px;padding:4px 8px;margin:3px;font-size:13px;min-width:80px;text-align:center;background:#faf7f2}
+.slot b{color:#7a4a21}
+.hand{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.card{position:relative;border:1px solid #cbb;border-radius:8px;padding:6px 10px;min-width:86px;max-width:120px;background:#fdfcf9;cursor:pointer;font-size:13px}
+.card.sel{outline:3px solid #1565c0}
+.card .letter{position:absolute;top:2px;right:6px;font-weight:bold;color:#c62828}
+.card.role{background:#fdecea;border-color:#e57373}
+.card.equip{background:#e8f5e9;border-color:#81c784}
+.card.trick{background:#e3f2fd;border-color:#64b5f6}
+.card.field{background:#fff8e1;border-color:#ffd54f}
+.card.back{background:#8a5a2b;color:#fff;text-align:center;cursor:default}
+#center{background:#fff;border:1px solid #d8c9b0;border-radius:10px;padding:12px;margin:8px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+#op{background:#fff;border:1px solid #d8c9b0;border-radius:10px;padding:12px;margin:8px 0}
+#opbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#log{background:#fffdf9;border:1px solid #e4d9c4;border-radius:8px;padding:8px;margin-top:8px;max-height:160px;overflow-y:auto;font-size:13px}
+#log div{padding:2px 0;border-bottom:1px dashed #eee}
+#selinfo{font-size:13px;color:#555;min-height:18px;margin-top:6px}
+#pending{background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:10px;margin:8px 0;font-size:14px}
+.tip{font-size:12px;color:#999}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>兰荫杀 · 联机测试版</h1>
+<div class="bar" id="joinbar">
+  房间号<input id="in_room" value="lanyin1" placeholder="房间号">
+  昵称<input id="in_name" placeholder="你的昵称">
+  <button class="btn green" onclick="join()">加入 / 开始</button>
+</div>
+
+<div id="pending" style="display:none"></div>
+<div class="bar" id="topbar" style="display:none"></div>
+<div id="players"></div>
+<div id="center"></div>
+<div id="op">
+  <div id="selinfo">点击自己的手牌选中，再点下方按钮使用。</div>
+  <div id="opbtns"></div>
+  <div id="log"></div>
+</div>
+</div>
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:16px;max-width:340px;width:92%;max-height:82vh;overflow:auto">
+    <div id="m_title" style="font-weight:bold;margin-bottom:10px"></div>
+    <div id="m_opts"></div>
+    <button class="btn gray" onclick="modalCancel()" style="margin-top:12px;width:100%">取消</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =========================================================
+   兰荫杀 联机版
+   ─ 你只需要改下面两行 SUPABASE_URL / SUPABASE_ANON_KEY
+   ─ 其他逻辑都在下方，想加新卡牌看文末【如何新增卡牌】
+   ========================================================= */
+const SUPABASE_URL = "https://xeiuyxfztmgvghjjjopy.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhlaXV5eGZ6dG1ndmdoampqb3B5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0OTkzNzUsImV4cCI6MjEwNDA3NTM3NX0.8JNY53pPLfmBMO2sUyyXQdyXV4I45YgKJbadYARBsgk";
+
+/* ============ 卡牌库定义 ============ */
+/* type: role角色 / equip装备 / trick锦囊 / field场地
+   role: atk=基础攻击力, field=连携所需场地 */
+const ROLES = {
+  "叶子绿":   {type:"role", atk:3, field:"厕所", s1:"攻击时可选择不攻击，改为回复攻击力点血", cb:"连携：本回合可同时攻击和回血"},
+  "英真":     {type:"role", atk:2, field:"厕所", s1:"上场时可无视场地使用连携", cb:"连携：对一名玩家造成3点伤害，随后英真进入弃牌堆"},
+  "陈天宝":   {type:"role", atk:1, field:"厕所", s1:"上场时所有其他角色的角色牌下场", cb:"连携：直到自己的下一回合不会受伤(整局一次)"},
+  "姚九":     {type:"role", atk:1, field:"家",   s1:"上场时立刻用一次连携；打出[打电话]判定A或C时立即用连携", cb:"连携：扣自己1血，对另一名玩家造成3点伤害"},
+  "徐睿":     {type:"role", atk:1, field:"家",   s1:"上场时选择与场上已有角色交换基础攻击力", cb:"连携：本回合可攻击两次"},
+  "坤磊":     {type:"role", atk:10,field:"家",   s1:"上场时抽2张；回合结束时本角色传给下一玩家手牌", cb:"连携：回合结束本角色回到原玩家手牌"},
+  "樊宇":     {type:"role", atk:1, field:"终焉之地", s1:"其他玩家判定时，该玩家扣2点血", cb:"连携：每次受伤只扣1点血"},
+  "威神代尔": {type:"role", atk:3, field:"终焉之地", s1:"血量高于5时攻击力+1", cb:"连携：可以同时攻击两个玩家"},
+  "唐炯":     {type:"role", atk:2, field:"终焉之地", s1:"装备栏为手机时攻击力+1", cb:"连携：装备栏的手机不会被替换"},
+  "朱雍森":   {type:"role", atk:3, field:"寝室", s1:"上场后所有玩家弃一张牌", cb:"连携：攻击一个玩家后该玩家弃一张牌"},
+  "廖宇":     {type:"role", atk:2, field:"寝室", s1:"攻击后判定，若为C可再攻击一次", cb:"连携：其他玩家回合开始时扣1血"},
+  "相仿云飞": {type:"role", atk:2, field:"寝室", s1:"上场时将弃牌堆中的手机置入手牌", cb:"连携：装备的手机效果改为攻击力+2"},
+  "王球新":   {type:"role", atk:3, field:"教室", s1:"喝酒：下次攻击+2，但下一个自己的回合直接结束", cb:"连携：选择一名玩家判定，若为B则其下回合跳过"},
+  "沈毅":     {type:"role", atk:3, field:"教室", s1:"上场时选择一名玩家交换手牌", cb:"连携：被攻击时不受锦囊和装备附加效果影响"},
+  "李金仙":   {type:"role", atk:0, field:"教室", s1:"选择一名玩家受到他自己攻击力的伤害", cb:"连携：使用技能1后基础攻击力+1"},
+  "懂东方":   {type:"role", atk:3, field:"特殊", s1:"所有锦囊都可当作[校长出面]使用", cb:"无场地连携，5张专属牌在他手中效果增强"}
+};
+const EQUIPS = {
+  "手机":   {type:"equip", desc:"攻击力+1"},
+  "闹钟":   {type:"equip", desc:"抽牌时多抽1张"},
+  "顺手":   {type:"equip", desc:"攻击时判定A或C，可选被攻击玩家一张牌入手"},
+  "脸皮":   {type:"equip", desc:"无视场地效果；装备时可装备给其他玩家"},
+  "电子烟": {type:"equip", desc:"被攻击时，攻击者扣1点血"},
+  "权威":   {type:"equip", desc:"攻击力+1(懂东方装备时+2)"}
+};
+const TRICKS = {
+  "闪":         {type:"trick", desc:"被攻击时打出可闪避这次伤害(可不在自己回合)"},
+  "henshin":    {type:"trick", desc:"开始摸牌，摸到非角色牌则弃掉，摸到角色牌则替换角色并停止"},
+  "周末双休":   {type:"trick", desc:"选择一名玩家判定，若为A则其跳过下一个回合"},
+  "囚徒困境":   {type:"trick", desc:"判定：A回5血，B抽3张，C扣5血"},
+  "牛奶大会":   {type:"trick", desc:"所有玩家+3血，场地失效2回合"},
+  "校长出面":   {type:"trick", desc:"其他玩家出锦囊后可打出使该锦囊无效"},
+  "食堂包子":   {type:"trick", desc:"判定：B或C回2血，A扣1血"},
+  "教育局出手": {type:"trick", desc:"判定：A所有角色下场，B所有玩家抽1张，C场地进弃牌堆"},
+  "打电话":     {type:"trick", desc:"抽2张牌"},
+  "玩多媒体":   {type:"trick", desc:"下一次攻击攻击力+1"},
+  "香香的早饭": {type:"trick", desc:"回复3点血"},
+  "文艺汇演":   {type:"trick", desc:"直到你的下一回合，其他玩家无法攻击(懂东方：还无法出牌)"},
+  "抢零食大会": {type:"trick", desc:"场地出现5血怪物叶亮(所有玩家可攻击)，打出者立即攻击怪物并回血(懂东方：直接回5血并生成怪物)"},
+  "寻视":       {type:"trick", desc:"查看牌顶5张并调换顺序放回(懂东方：5张全部归其所有)"},
+  "发怒":       {type:"trick", desc:"下一次攻击攻击力+1(懂东方：+2)"}
+};
+const FIELDS = {
+  "厕所":       {type:"field", desc:"玩家回合结束时扣2点血"},
+  "家":         {type:"field", desc:"所有玩家装备失效(优先级最高)"},
+  "终焉之地":   {type:"field", desc:"回合结束时弃所有手牌并抽相同数量(最多3张)"},
+  "寝室":       {type:"field", desc:"回合结束时若未攻击则回2点血"},
+  "教室":       {type:"field", desc:"回合结束时若未造成≥3点伤害则扣1点血"}
+};
+
+/* ============ 工具 ============ */
+let uid = ()=> Math.random().toString(36).slice(2,10);
+function shuffle(a){ for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+function makeCard(name){ return {name, letter:"ABC"[Math.floor(Math.random()*3)], id:uid()}; }
+function cardInfo(c){ const d = ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{}; return d; }
+function cardType(c){ const d=cardInfo(c); return d.type||"trick"; }
+
+/* ============ 牌库构建(固定牌+随机补齐到51张) ============ */
+function buildDeckNames(){
+  let d=[];
+  Object.keys(ROLES).forEach(n=>d.push(n));        // 16角色
+  Object.keys(FIELDS).forEach(n=>d.push(n));       // 5场地
+  Object.keys(EQUIPS).forEach(n=>d.push(n));       // 6装备
+  ["闪","闪"].forEach(n=>d.push(n));               // 闪至少2张
+  Object.keys(TRICKS).forEach(n=>{ if(n!=="闪") d.push(n); }); // 其余锦囊各1
+  const fill=[...Object.keys(EQUIPS),...Object.keys(TRICKS)];
+  while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]); // 随机补到51
+  return shuffle(d);
+}
+
+/* ============ Supabase 连接与状态 ============ */
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let room="lanyin1", meId="", meName="", state=null, sub=null, selIdx=-1;
+
+async function refresh(){ 
+  const {data}=await sb.from("games").select("*").eq("id",room).maybeSingle();
+  if(data){
+    const s=JSON.parse(data.state);
+    if((s.v||0)>=(state.v||0)){ state=s; render(); } // 服务器比本地新才覆盖，避免盖掉自己刚提交的
+  }
+}
+/* 页面内选择弹层（替代 prompt，手机也能用） */
+let _askRes=null, _askOpts=[];
+function ask(title, opts, withText){
+  return new Promise(res=>{
+    _askRes=res; _askOpts=opts||[];
+    document.getElementById("m_title").innerHTML=title;
+    let b=_askOpts.map((o,i)=>`<button class="btn" style="display:block;width:100%;margin:4px 0;text-align:left" onclick="pickChoice(${i})">${o.label}</button>`).join("");
+    if(withText){ b+=`<input id="m_text" style="width:100%;padding:8px;margin-top:6px;border:1px solid #cbb;border-radius:6px;font-size:15px" placeholder="在此输入内容">`+
+      `<button class="btn green" style="width:100%;margin-top:6px" onclick="pickText()">确定</button>`; }
+    document.getElementById("m_opts").innerHTML=b;
+    document.getElementById("modal").style.display="flex";
+  });
+}
+function pickChoice(i){
+  const r=_askRes; if(!r) return;
+  _askRes=null; document.getElementById("modal").style.display="none";
+  r(_askOpts[i] ? _askOpts[i].value : null);
+}
+function pickText(){
+  const r=_askRes; if(!r) return;
+  _askRes=null; document.getElementById("modal").style.display="none";
+  r(document.getElementById("m_text").value||"");
+}
+function modalCancel(){ pickChoice(-1); }
+// 兜底：每3秒自动拉取最新状态(实时通道断了也能看到别人的操作)
+setInterval(()=>{ if(state && state.status) refresh(); }, 3000);
+async function doCommit(msg){
+  const oldV=state.v||0;
+  state.v=oldV+1;
+  if(msg) addLog(msg);
+  render(); // 本地先立刻刷新界面，不等服务器，点击马上有反应
+  const {data,error}=await sb.from("games")
+    .update({state:JSON.stringify(state), version:state.v, updated_at:new Date().toISOString()})
+    .eq("id",room).eq("version",oldV).select("version");
+  if(error||!data||!data.length){ state.v=oldV; alert("操作冲突(别人也同时操作了)，请重试一次。"); return false; }
+  return true;
+}
+async function pushState(){ // 新增房间用
+  const {error}=await sb.from("games").insert({id:room,state:JSON.stringify(state),version:state.v,updated_at:new Date().toISOString()});
+  return !error;
+}
+
+/* ============ 新游戏 ============ */
+function newGame(){
+  const names=buildDeckNames();
+  return {
+    v:1, room, players:{}, order:[], turn:null, turnCount:0,
+    status:"waiting", hostId:null,
+    field:null, fieldCooldown:0, drawPile:names.map(makeCard), discardPile:[],
+    monster:null, pending:null, log:["房间已创建，等待房主开始游戏"]
+  };
+}
+function me(){ return state.players[meId]; }
+function currentTurnPlayer(){ return state.players[state.turn]; }
+function comboActive(p){
+  if(!p.role) return false;
+  if(p.role.name==="懂东方") return false;
+  if(p.yingFreeCombo) return true;
+  return state.field && state.fieldCooldown<=0 && state.field.name===p.role.field;
+}
+function homeActive(){ return state.field && state.fieldCooldown<=0 && state.field.name==="家"; }
+function equipActive(p){ return !(homeActive() && !(p.equip&&p.equip.name==="脸皮")); }
+function fieldOn(){ return state.field && state.fieldCooldown<=0; }
+
+/* ============ 抽/弃/判定 ============ */
+function draw(p,n){
+  for(let i=0;i<n;i++){
+    if(state.drawPile.length===0 && state.discardPile.length>0){
+      state.drawPile=shuffle(state.discardPile.slice()); state.discardPile=[];
+      addLog("抽牌堆空了，弃牌堆洗回牌库");
+    }
+    if(state.drawPile.length===0) break;
+    p.hand.push(state.drawPile.pop());
+  }
+}
+function judge(byId){ // 判定：抽一张看右上角字母；樊宇在场时其他玩家判定扣2血
+  if(state.drawPile.length===0 && state.discardPile.length>0){
+    state.drawPile=shuffle(state.discardPile.slice()); state.discardPile=[];
+  }
+  if(state.drawPile.length===0){ addLog("牌库已空，判定按B处理"); return "B"; }
+  const c=state.drawPile.pop(); state.discardPile.push(c);
+  // 樊宇：其他玩家判定时，判定者扣2血
+  if(byId){
+    for(const id in state.players){
+      const fx=state.players[id];
+      if(fx.role && fx.role.name==="樊宇" && id!==byId){
+        const j=state.players[byId];
+        if(j && j.hp>0){ j.hp=Math.max(0,j.hp-2); addLog(j.name+"判定时受樊宇影响扣2血"); }
+      }
+    }
+  }
+  addLog("判定结果："+c.letter);
+  return c.letter;
+}
+function discardHandAt(p,idx){
+  if(idx<0||idx>=p.hand.length) return;
+  state.discardPile.push(p.hand[idx]); p.hand.splice(idx,1);
+}
+function findInDiscard(name){ const i=state.discardPile.findIndex(c=>c.name===name); if(i>=0){const c=state.discardPile.splice(i,1)[0]; return c;} return null; }
+
+/* ============ 攻击力计算 ============ */
+function calcAtk(p,target){
+  let a = p.role?p.role.atk:0;
+  if(p.equip && equipActive(p)){
+    const en=p.equip.name;
+    if(en==="手机") a += (p.role.name==="相仿云飞"&&comboActive(p))?2:1;
+    if(en==="权威") a += (p.role.name==="懂东方")?2:1;
+  }
+  if(p.role.name==="威神代尔" && p.hp>5) a+=1;
+  if(p.role.name==="唐炯" && equipActive(p) && p.equip && p.equip.name==="手机") a+=1;
+  if(p.rage>0) a+=p.rage;       // 发怒
+  if(p.playMedia) a+=1;         // 玩多媒体
+  if(p.drunk) a+=2;             // 王球新喝酒
+  // 沈毅连携：所受伤害忽略锦囊/装备附加
+  if(target && target.role && target.role.name==="沈毅" && comboActive(target)){
+    a=p.role.atk;
+    if(p.role.name==="威神代尔"&&p.hp>5) a+=1;
+  }
+  return Math.max(0,a);
+}
+
+/* ============ 角色上场 ============ */
+async function onPlayRole(p, card){
+  const old = p.role;
+  if(old){ state.discardPile.push(old); addLog(p.name+"的旧角色"+old.name+"进入弃牌堆"); }
+  p.role = card; p.roleJustPlayed = true;
+  p.hasAttacked=false; p.attackCount=0; p.dmgThisTurn=0;
+  addLog(p.name+"上了角色【"+card.name+"】");
+  // ---- 陈天宝：其他角色下场 ----
+  if(card.name==="陈天宝"){
+    for(const id in state.players){
+      const q=state.players[id];
+      if(q.role && id!==p.id){ state.discardPile.push(q.role); addLog(q.name+"的角色"+q.role.name+"被陈天宝威慑下场"); q.role=null; }
+    }
+  }
+  // ---- 英真：上场可无视场地用连携 ----
+  if(card.name==="英真") p.yingFreeCombo=true;
+  // ---- 姚九：上场立即用一次连携 ----
+  if(card.name==="姚九"){
+    await comboYao(p,"上场立即连携");
+  }
+  // ---- 徐睿：交换基础攻击力 ----
+  if(card.name==="徐睿"){
+    const ids=Object.keys(state.players).filter(id=>state.players[id].role && id!==p.id);
+    if(ids.length){
+      const t=await ask("选择要交换基础攻击力的玩家", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"("+state.players[id].role.name+" 攻"+state.players[id].role.atk+")",value:String(i+1)})));
+      const k=parseInt(t||"0")-1;
+      if(ids[k]){ const q=state.players[ids[k]]; const tmp=q.role.atk; q.role.atk=p.role.atk; p.role.atk=tmp; addLog(p.name+"与"+q.name+"交换了基础攻击力"); }
+    }
+  }
+  // ---- 坤磊：抽2 ----
+  if(card.name==="坤磊"){ draw(p,2); addLog(p.name+"上场抽2张牌"); }
+  // ---- 朱雍森：所有玩家弃1张 ----
+  if(card.name==="朱雍森"){
+    for(const id in state.players){
+      const q=state.players[id];
+      if(q.hand.length){ discardHandAt(q,q.hand.length-1); addLog(q.name+"弃1张牌"); }
+    }
+  }
+  // ---- 沈毅：交换手牌 ----
+  if(card.name==="沈毅"){
+    const ids=Object.keys(state.players).filter(id=>id!==p.id);
+    if(ids.length){
+      const t=await ask("选择要交换手牌的玩家", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"(手牌"+state.players[id].hand.length+"张)",value:String(i+1)})));
+      const k=parseInt(t||"0")-1;
+      if(ids[k]){ const q=state.players[ids[k]]; const tmp=q.hand; q.hand=p.hand; p.hand=tmp; addLog(p.name+"与"+q.name+"交换了手牌"); }
+    }
+  }
+  // ---- 相仿云飞：从弃牌堆拿手机 ----
+  if(card.name==="相仿云飞"){
+    const c=findInDiscard("手机");
+    if(c){ p.hand.push(c); addLog(p.name+"从弃牌堆拿回一张手机"); }
+  }
+}
+
+/* ============ 打出/装备/场地牌 ============ */
+async function playSelected(){
+  if(!state || state.pending) { alert("当前有等待响应的操作"); return; }
+  const p=me();
+  if(state.turn!==meId){ alert("不是你的回合"); return; }
+  // 文艺汇演(懂东方版)：其他玩家无法出牌
+  for(const id in state.players){
+    const q=state.players[id];
+    if(q.artLock && id!==meId && q.role && q.role.name==="懂东方"){
+      alert("懂东方的文艺汇演中，你不能出牌"); return;
+    }
+  }
+  if(selIdx<0 || !p.hand[selIdx]){ alert("先点选一张手牌"); return; }
+  const card=p.hand[selIdx];
+  const type=cardType(card);
+  if(card.name==="闪"){ alert("闪是被攻击时响应的牌，不能主动打出"); return; }
+  if(card.name==="校长出面"){ alert("校长出面是响应别人出锦囊时使用的牌"); return; }
+  if(type==="role"){ await onPlayRole(p,card); p.hand.splice(selIdx,1); selIdx=-1; }
+  else if(type==="field"){
+    if(state.field){ state.discardPile.push(state.field); addLog("旧场地"+state.field.name+"进入弃牌堆"); }
+    state.field=card; p.hand.splice(selIdx,1); selIdx=-1;
+    addLog(p.name+"打出了场地【"+card.name+"】");
+  }
+  else if(type==="equip"){
+    // 唐炯连携：手机不可被替换
+    if(p.role && p.role.name==="唐炯" && comboActive(p) && p.equip && p.equip.name==="手机"){
+      alert("唐炯连携激活，手机无法被替换"); return;
+    }
+    // 脸皮可装备给其他玩家
+    if(card.name==="脸皮"){
+      const t=await ask("脸皮装备给谁？", Object.keys(state.players).map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+(id===meId?"(自己)":""),value:String(i+1)})));
+      const k=parseInt(t||"1")-1;
+      const ids2=Object.keys(state.players);
+      if(ids2[k]){
+        const q=state.players[ids2[k]];
+        if(q.equip) state.discardPile.push(q.equip);
+        q.equip=card; addLog("【脸皮】装备给了"+q.name);
+      }
+      p.hand.splice(selIdx,1); selIdx=-1;
+      commitNow(); return;
+    }
+    if(p.equip){ state.discardPile.push(p.equip); addLog(p.name+"旧装备"+p.equip.name+"进入弃牌堆"); }
+    p.equip=card; p.hand.splice(selIdx,1); selIdx=-1;
+    addLog(p.name+"装备了【"+card.name+"】");
+  }
+  else{ // 锦囊
+    // 进入反制响应阶段
+    state.pending={type:"trick", from:meId, fromName:meName, card, desc:card.name+" - "+(TRICKS[card.name]?TRICKS[card.name].desc:"")};
+    p.hand.splice(selIdx,1); selIdx=-1;
+    addLog(p.name+"打出了锦囊【"+card.name+"】，等待其他人响应(可被校长出面反制)");
+  }
+  commitNow();
+}
+async function commitNow(){ await doCommit(); }
+
+/* ============ 攻击 ============ */
+async function attackAction(){
+  if(!state||state.pending){alert("有操作在等待响应");return;}
+  const p=me();
+  if(state.turn!==meId){alert("不是你的回合");return;}
+  if(!p.role){alert("没有角色，无法攻击");return;}
+  if(p.roleJustPlayed){alert("刚上场的角色本回合不能攻击");return;}
+  if(p.attackCount>=maxAttack(p)){alert("本回合不能再攻击");return;}
+  // 文艺汇演：别人在场时你不能攻击
+  for(const id in state.players){
+    const q=state.players[id];
+    if(q.artLock && id!==meId){ alert("文艺汇演中("+q.name+")，本回合你不能攻击"); return; }
+  }
+  // 叶子绿技能1：攻击时可选择改为回血
+  if(p.role.name==="叶子绿"){
+    const cho=await ask("叶子绿选择", [{label:"正常攻击",value:"1"},{label:"不攻击，回复"+p.role.atk+"点血",value:"2"}]);
+    if(cho!=null && String(cho)==="2"){
+      p.hp=Math.min(10,p.hp+p.role.atk);
+      addLog(p.name+"选择不攻击，回复"+p.role.atk+"点血");
+      commitNow(); return;
+    }
+    if(cho==null) return;
+  }
+  // 选目标：玩家或怪物
+  const opts=Object.keys(state.players).map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+(state.players[id]===p?"(自己)":""),value:String(i+1)}));
+  if(state.monster) opts.push({label:"怪物叶亮(HP "+state.monster.hp+")", value:"m"});
+  const t=await ask("选择攻击目标", opts);
+  if(t==null) return;
+  if(String(t).toLowerCase()==="m" && state.monster){ attackMonster(p); return; }
+  const ids=Object.keys(state.players);
+  const k=parseInt(t||"0")-1;
+  if(!ids[k]){alert("目标无效");return;}
+  const target=state.players[ids[k]];
+  if(target===p){alert("不能攻击自己");return;}
+  let dmg=calcAtk(p,target);
+  state.pending={type:"attack", from:meId, to:target.id, dmg, atkName:p.role.name};
+  p.attackCount=(p.attackCount||0)+1;
+  addLog(p.name+"攻击"+target.name+"，伤害"+dmg+"，等待对方响应…");
+  commitNow();
+}
+function maxAttack(p){
+  // 徐睿连携：可攻击两次；廖宇判定C可再攻击一次(由canAtkAgain标记)
+  let m=1;
+  if(p.role && p.role.name==="徐睿" && comboActive(p)) m=2;
+  if(p.role && p.role.name==="廖宇" && p.canAtkAgain) m=2;
+  return m;
+}
+function attackMonster(p){
+  let dmg=calcAtk(p,null);
+  state.monster.hp-=dmg;
+  p.dmgThisTurn=(p.dmgThisTurn||0)+dmg;
+  addLog(p.name+"攻击怪物叶亮，造成"+dmg+"伤害");
+  if(state.monster.hp<=0){ addLog("怪物叶亮被击败！"); state.monster=null; }
+  afterAttackHit(p,null);
+  commitNow();
+}
+// 攻击命中结算(目标已响应"承受"后调用)
+function resolveHit(from,target,dmg){
+  // 电子烟反伤
+  if(target.equip && target.equip.name==="电子烟" && equipActive(target)){
+    from.hp=Math.max(0,from.hp-1); addLog("电子烟反伤："+target.name+"使"+from.name+"扣1血");
+  }
+  // 陈天宝无敌
+  if(target.invuln){ addLog(target.name+"处于陈天宝铁壁保护，本次伤害无效"); dmg=0; }
+  // 樊宇连携：只受1伤
+  if(target.role && target.role.name==="樊宇" && comboActive(target) && dmg>1){ dmg=1; addLog("樊宇连携生效，伤害降为1"); }
+  target.hp=Math.max(0,target.hp-dmg);
+  from.dmgThisTurn=(from.dmgThisTurn||0)+dmg;
+  addLog(from.name+"对"+target.name+"造成"+dmg+"伤害");
+  // 顺手：判定AC拿对方一张牌
+  if(from.equip && from.equip.name==="顺手" && equipActive(from) && target.hand.length){
+    const L=judge(from.id);
+    if(L==="A"||L==="C"){ const c=target.hand.splice(Math.floor(Math.random()*target.hand.length),1)[0]; from.hand.push(c); addLog("顺手判定"+L+"，"+from.name+"拿走"+target.name+"的一张"+c.name); }
+  }
+  // 叶子绿连携：攻击同时回血
+  if(from.role && from.role.name==="叶子绿" && from.leafCombo){
+    from.hp=Math.min(10,from.hp+from.role.atk);
+    addLog("叶子绿连携：攻击同时回复"+from.role.atk+"点血");
+  }
+  // 廖宇：攻击后判定C可再攻击
+  if(from.role && from.role.name==="廖宇"){
+    const L=judge(from.id);
+    if(L==="C"){ from.canAtkAgain=true; addLog("廖宇判定C，可再攻击一次"); }
+  }
+  // 朱雍森连携：目标弃一张
+  if(from.role && from.role.name==="朱雍森" && comboActive(from) && target.hand.length){
+    discardHandAt(target,target.hand.length-1); addLog("朱雍森连携："+target.name+"弃1张牌");
+  }
+  afterAttackHit(from,target);
+}
+function afterAttackHit(from,target){
+  if(from.drunk) from.drunk=false;
+  if(from.rage) from.rage=0;
+  if(from.playMedia) from.playMedia=false;
+  render();
+}
+
+/* ============ 技能1 ============ */
+async function skill1Action(){
+  if(!state||state.pending){alert("有操作在等待响应");return;}
+  const p=me();
+  if(state.turn!==meId){alert("不是你的回合");return;}
+  if(!p.role){alert("没有角色");return;}
+  const n=p.role.name;
+  if(n==="王球新"){
+    if(p.drunk){alert("已经在喝酒状态");return;}
+    p.drunk=true; p.skipNextTurn=true;
+    addLog(p.name+"喝酒：下次攻击+2，但下一个自己的回合直接结束");
+  }else if(n==="李金仙"){
+    const ids=Object.keys(state.players);
+    const t=await ask("选择目标玩家，使其受到自己攻击力的伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+(state.players[id].role?"(攻"+state.players[id].role.atk+")":"(无角色0)"),value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){
+      const q=state.players[ids[k]];
+      const d=q.role?q.role.atk:0;
+      if(q.invuln){ addLog(q.name+"有陈天宝铁壁保护，本次无效"); }
+      else{ q.hp=Math.max(0,q.hp-d); p.dmgThisTurn=(p.dmgThisTurn||0)+d; addLog(p.name+"让"+q.name+"受到自己攻击力"+d+"伤害"); }
+      if(comboActive(p)){ p.role.atk+=1; addLog("李金仙连携生效，基础攻击力+1"); }
+    }
+  }else if(n==="懂东方"){
+    alert("懂东方的技能是【所有锦囊都可当作校长出面使用】。在别人打出锦囊时，点击\"锦囊反制\"即可(无需手中有校长出面)。");
+  }else{
+    alert("【"+n+"】的技能1："+(ROLES[n]?ROLES[n].s1:"")+"\n该技能为上场/被动效果，无需主动使用。");
+  }
+  commitNow();
+}
+
+/* ============ 连携 ============ */
+async function comboAction(){
+  if(!state||state.pending){alert("有操作在等待响应");return;}
+  const p=me();
+  if(state.turn!==meId){alert("不是你的回合");return;}
+  if(!p.role){alert("没有角色");return;}
+  if(p.role.name==="懂东方"){alert("懂东方没有场地连携");return;}
+  if(!comboActive(p)){ alert("连携需要场地【"+p.role.field+"】在场"+(p.yingFreeCombo?"(英真本回合可无视场地)":"")); return; }
+  const n=p.role.name;
+  if(n==="叶子绿"){
+    p.leafCombo=true; addLog(p.name+"激活连携：本回合可同时攻击和回血");
+  }else if(n==="英真"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId);
+    const t=await ask("选择英真连携目标", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ const q=state.players[ids[k]]; q.hp=Math.max(0,q.hp-3); addLog("英真对"+q.name+"造成3点伤害"); }
+    state.discardPile.push(p.role); p.role=null; p.yingFreeCombo=false;
+    addLog("英真进入弃牌堆");
+  }else if(n==="陈天宝"){
+    if(p.savedUsed){alert("陈天宝铁壁整局只能用一次");return;}
+    p.savedUsed=true; p.invuln=true; addLog("陈天宝铁壁：直到你的下一回合不会受伤");
+  }else if(n==="姚九"){
+    await comboYao(p,"连携");
+  }else if(n==="徐睿"){
+    p.doubleAttack=true; addLog("徐睿连携：本回合可攻击两次");
+  }else if(n==="坤磊"){
+    p.kunHome=true; addLog("坤磊连携：回合结束时回到原玩家手牌");
+  }else if(n==="威神代尔"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId);
+    const t1=await ask("威神代尔横扫·选择第一个目标", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    if(t1==null) return;
+    const t2=await ask("威神代尔横扫·选择第二个目标", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    if(t2==null) return;
+    const k1=parseInt(t1)-1, k2=parseInt(t2)-1;
+    if(ids[k1]||ids[k2]){
+      const dmg=calcAtk(p,null);
+      const seen={};
+      [k1,k2].forEach(k=>{
+        if(ids[k]===undefined||seen[k]) return; seen[k]=true;
+        const q=state.players[ids[k]];
+        if(q.invuln){addLog(q.name+"受铁壁保护");return;}
+        q.hp=Math.max(0,q.hp-dmg); p.dmgThisTurn=(p.dmgThisTurn||0)+dmg; addLog(p.name+"横扫"+q.name+"造成"+dmg+"伤害");
+      });
+      afterAttackHit(p,null);
+    }
+  }else if(n==="唐炯"){
+    p.tangGuarded=true; addLog("唐炯连携：装备栏手机不会被替换");
+  }else if(n==="朱雍森"){
+    p.zhuCombo=true; addLog("朱雍森连携：攻击后目标弃一张牌(已激活)");
+  }else if(n==="廖宇"){
+    p.liaoCombo=true; addLog("廖宇连携：其他玩家回合开始时扣1血");
+  }else if(n==="相仿云飞"){
+    p.xiangCombo=true; addLog("相仿云飞连携：装备手机效果改为攻击力+2");
+  }else if(n==="王球新"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId);
+    const t=await ask("选择连携目标，判定为B则其下回合跳过", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ const L=judge(p.id); if(L==="B"){ state.players[ids[k]].skipNextTurn=true; addLog(state.players[ids[k]].name+"下一个回合将跳过"); } }
+  }else if(n==="沈毅"){
+    p.shenCombo=true; addLog("沈毅连携：被攻击时不受锦囊/装备附加效果影响");
+  }else if(n==="李金仙"){
+    alert("李金仙连携为被动：使用技能1后基础攻击力+1(已集成在技能1里)");
+  }else{
+    alert("该角色暂无主动连携操作");
+  }
+  commitNow();
+}
+async function comboYao(p,why){
+  // 姚九连携：扣自己1血，打别人3血
+  const ids=Object.keys(state.players).filter(id=>id!==p.id);
+  if(!ids.length){ alert("没有其他玩家"); return; }
+  const t=await ask(why+"：扣自己1血，对另一名玩家造成3点伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+  const k=parseInt(t||"0")-1;
+  if(ids[k]){
+    p.hp=Math.max(0,p.hp-1);
+    const q=state.players[ids[k]];
+    if(q.invuln){ addLog(q.name+"受铁壁保护，无伤害"); }
+    else{ q.hp=Math.max(0,q.hp-3); addLog(why+"：姚九扣1血，对"+q.name+"造成3点伤害"); }
+  }
+}
+
+/* ============ 锦囊生效 ============ */
+async function applyTrick(p,card){
+  const n=card.name;
+  const isDong=(p.role && p.role.name==="懂东方");
+  if(n==="henshin"){
+    while(state.drawPile.length){
+      const c=state.drawPile.pop();
+      if(cardType(c)==="role"){ if(p.role) state.discardPile.push(p.role); p.role=c; p.roleJustPlayed=true; addLog("henshin摸到角色【"+c.name+"】并替换上场"); break; }
+      else state.discardPile.push(c);
+    }
+  }else if(n==="周末双休"){
+    const ids=Object.keys(state.players).filter(id=>id!==p.id);
+    const t=await ask("选择周末双休目标(判定A则跳过下回合)", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ if(judge(p.id)==="A"){ state.players[ids[k]].skipNextTurn=true; addLog(state.players[ids[k]].name+"下一个回合跳过"); } }
+  }else if(n==="囚徒困境"){
+    const L=judge(p.id);
+    if(L==="A"){ p.hp=Math.min(10,p.hp+5); addLog("囚徒困境A：回5血"); }
+    else if(L==="B"){ draw(p,3); addLog("囚徒困境B：抽3张"); }
+    else{ p.hp=Math.max(0,p.hp-5); addLog("囚徒困境C：扣5血"); }
+  }else if(n==="牛奶大会"){
+    for(const id in state.players){ state.players[id].hp=Math.min(10,state.players[id].hp+3); }
+    state.fieldCooldown=2;
+    addLog("牛奶大会：所有玩家+3血，场地失效2回合");
+  }else if(n==="食堂包子"){
+    const L=judge(p.id);
+    if(L==="A"){ p.hp=Math.max(0,p.hp-1); addLog("食堂包子A：扣1血"); }
+    else{ p.hp=Math.min(10,p.hp+2); addLog("食堂包子"+L+"：回2血"); }
+  }else if(n==="教育局出手"){
+    const L=judge(p.id);
+    if(L==="A"){ for(const id in state.players){ const q=state.players[id]; if(q.role){ state.discardPile.push(q.role); q.role=null; } } addLog("教育局出手A：所有角色下场"); }
+    else if(L==="B"){ for(const id in state.players){ draw(state.players[id],1); } addLog("教育局出手B：所有玩家抽1张"); }
+    else if(state.field){ state.discardPile.push(state.field); state.field=null; addLog("教育局出手C：场地进入弃牌堆"); }
+  }else if(n==="打电话"){
+    draw(p,2); addLog(p.name+"抽2张牌");
+    // 姚九：判定AC立即连携
+    if(p.role && p.role.name==="姚九"){
+      const L=judge(p.id);
+      if(L==="A"||L==="C"){ addLog("姚九打电话判定"+L+"，立即触发连携"); await comboYao(p,"打电话触发连携"); }
+    }
+  }else if(n==="玩多媒体"){ p.playMedia=true; addLog("玩多媒体：下次攻击+1"); }
+  else if(n==="香香的早饭"){ p.hp=Math.min(10,p.hp+3); addLog("香香的早饭：回3血"); }
+  else if(n==="文艺汇演"){
+    p.artLock=true; addLog("文艺汇演：直到你的下一回合，其他玩家"+(isDong?"无法出牌":"无法攻击"));
+  }else if(n==="抢零食大会"){
+    if(isDong){ p.hp=Math.min(10,p.hp+5); state.monster={name:"叶亮",hp:5,maxHp:5}; addLog("懂东方回5血并生成怪物叶亮(5血)"); }
+    else{
+      state.monster={name:"叶亮",hp:5,maxHp:5};
+      addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物");
+      attackMonster(p);
+    }
+  }else if(n==="寻视"){
+    if(isDong){
+      const take=state.drawPile.splice(Math.max(0,state.drawPile.length-5));
+      p.hand.push(...take); addLog("懂东方查看牌顶5张并全部归为己有");
+    }else{
+      const top=state.drawPile.slice(Math.max(0,state.drawPile.length-5));
+      if(top.length){
+        const order=await ask("查看牌顶"+top.length+"张(从旧到新)：\n"+top.map((c,i)=>(i+1)+"."+c.name).join("\n")+"\n\n输入新的顺序编号(如 54321 表示倒序)", [], true);
+        if(order){
+          const seq=(order||"").replace(/\D/g,"").split("").map(x=>parseInt(x)-1);
+          const arr=top.slice();
+          const perm=seq.filter(i=>i>=0&&i<arr.length);
+          if(perm.length===arr.length){
+            for(let i=0;i<arr.length;i++) state.drawPile[state.drawPile.length-arr.length+i]=arr[perm[i]];
+            addLog(p.name+"重新排列了牌顶"+arr.length+"张牌");
+          }
+        }
+      } else addLog("牌库不足5张");
+    }
+  }else if(n==="发怒"){ p.rage=isDong?2:1; addLog("发怒：下次攻击+"+(isDong?2:1)); }
+  else{ addLog("锦囊【"+n+"】已生效"); }
+  commitNow();
+}
+
+/* ============ 回合流程 ============ */
+let turnDepth=0;
+function turnBegin(p){
+  if(!p) return;
+  addLog("—— "+p.name+" 的回合开始 ——");
+  // 王球新喝酒的代价：本回合直接结束
+  if(p.skipNextTurn){ p.skipNextTurn=false; addLog(p.name+"因喝酒代价，本回合直接结束"); endTurn(); return; }
+  p.hasAttacked=false; p.attackCount=0; p.canAtkAgain=false; p.dmgThisTurn=0;
+  p.roleJustPlayed=false; // 过了自己的回合，角色可攻击了
+  p.yingFreeCombo=false;
+  if(p.artLock){ p.artLock=false; addLog(p.name+"的文艺汇演结束，其他人可恢复行动"); }
+  if(p.invuln){ p.invuln=false; addLog(p.name+"的陈天宝铁壁到期解除"); }
+  // 廖宇连携：其他玩家回合开始扣1血
+  for(const id in state.players){
+    const q=state.players[id];
+    if(q.role && q.role.name==="廖宇" && comboActive(q) && id!==p.id){ p.hp=Math.max(0,p.hp-1); addLog("廖宇连携："+p.name+"回合开始扣1血"); }
+  }
+  // 抽牌
+  let n=1;
+  if(p.equip && p.equip.name==="闹钟" && equipActive(p)) n++;
+  draw(p,n);
+  addLog(p.name+"抽"+n+"张牌");
+}
+function endTurn(){
+  const p=currentTurnPlayer();
+  if(!p) return;
+  // 弃到3张
+  while(p.hand.length>3) discardHandAt(p,0);
+  addLog(p.name+"回合结束，手牌弃至3张");
+  // 场地效果
+  const lp = p.equip && p.equip.name==="脸皮";
+  if(fieldOn() && !lp){
+    const f=state.field.name;
+    if(f==="厕所"){ p.hp=Math.max(0,p.hp-2); addLog("厕所："+p.name+"扣2血"); }
+    else if(f==="终焉之地"){
+      const cnt=Math.min(3,p.hand.length);
+      for(let i=0;i<cnt;i++) discardHandAt(p,0);
+      draw(p,cnt);
+      addLog("终焉之地："+p.name+"弃"+cnt+"张并抽"+cnt+"张");
+    }
+    else if(f==="寝室" && !p.hasAttacked){ p.hp=Math.min(10,p.hp+2); addLog("寝室："+p.name+"未攻击回2血"); }
+    else if(f==="教室" && (p.dmgThisTurn||0)<3){ p.hp=Math.max(0,p.hp-1); addLog("教室："+p.name+"本回合伤害不足3，扣1血"); }
+  }
+  // 坤磊传递
+  if(p.role && p.role.name==="坤磊"){
+    const nxt=nextPlayerId(p.id);
+    if(p.kunHome){ p.kunHome=false; p.hand.push(p.role); p.role=null; addLog("坤磊连携：回到"+p.name+"手牌"); }
+    else if(nxt){ state.players[nxt].hand.push(p.role); p.role=null; addLog("坤磊传给"+state.players[nxt].name+"手牌"); }
+  }
+  if(state.fieldCooldown>0) state.fieldCooldown--;
+  // 轮到下家
+  state.turn=nextPlayerId(p.id);
+  state.turnCount++;
+  advanceTurn();
+}
+async function advanceTurn(){
+  if(turnDepth>6){ turnDepth=0; addLog("回合连续跳转过深，停止自动轮转"); await doCommit(); render(); return; }
+  turnDepth++;
+  turnBegin(currentTurnPlayer());
+  await doCommit();
+  turnDepth--;
+  render();
+}
+function nextPlayerId(id){
+  const order=state.order;
+  const i=order.indexOf(id);
+  for(let k=1;k<=order.length;k++){ const q=order[(i+k)%order.length]; if(state.players[q] && !state.players[q].dead) return q; }
+  return order[0];
+}
+
+/* ============ 响应(闪 / 校长出面) ============ */
+function respondFlash(){
+  const p=me();
+  const i=p.hand.findIndex(c=>c.name==="闪");
+  if(i<0){ alert("你没有闪"); return; }
+  state.discardPile.push(p.hand.splice(i,1)[0]);
+  state.pending=null;
+  addLog(p.name+"打出【闪】，闪避了攻击");
+  commitNow();
+}
+function respondTake(){
+  const pk=state.pending;
+  const from=state.players[pk.from], target=state.players[pk.to];
+  state.pending=null;
+  resolveHit(from,target,pk.dmg);
+  commitNow();
+}
+async function respondTrickOk(){ // 出锦囊者确认生效
+  const pk=state.pending;
+  const from=state.players[pk.from];
+  state.pending=null;
+  if(pk.canceled){ addLog("锦囊【"+pk.card.name+"】被反制无效"); }
+  else{ await applyTrick(from,pk.card); return; }
+  commitNow();
+}
+function respondTrickVeto(){ // 其他玩家反制
+  const pk=state.pending;
+  const p=me();
+  let used=null;
+  const i=p.hand.findIndex(c=>c.name==="校长出面");
+  const isDong=(p.role && p.role.name==="懂东方");
+  if(i>=0){ used=p.hand.splice(i,1)[0]; }
+  else if(isDong && p.hand.length){ used=p.hand.splice(0,1)[0]; addLog(p.name+"用懂东方特权，将锦囊【"+used.name+"】当作校长出面"); }
+  else{ alert("你没有校长出面"+(isDong?"(懂东方可弃任意一张锦囊反制)":"")); return; }
+  if(used) state.discardPile.push(used);
+  pk.canceled=true;
+  addLog(p.name+"打出【校长出面】反制"+pk.fromName+"的锦囊");
+  commitNow();
+}
+
+/* ============ 渲染 ============ */
+function esc(s){ return (s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function render(){
+  if(!state) return;
+  // ── 等待房主开始阶段 ──
+  if(state.status!=="playing"){
+    const ph=document.getElementById("players");
+    let h="";
+    state.order.forEach(pid=>{
+      const p=state.players[pid]; if(!p) return;
+      h+=`<div class="ply"><div class="nm">${esc(p.name)}${pid===state.hostId?"(房主)":""}</div><div style="font-size:13px;color:#777">已加入，等待开始…</div></div>`;
+    });
+    ph.innerHTML=h;
+    document.getElementById("center").innerHTML=
+      `<div class="slot">抽牌堆：<b>${state.drawPile.length}</b>张</div>
+       <div class="slot">弃牌堆：<b>0</b>张</div>
+       <div class="tip" style="min-width:200px">牌库已按51张洗好，房主开始后才发牌。</div>`;
+    const tb=document.getElementById("topbar"); tb.style.display="flex";
+    tb.innerHTML="<b>房间：</b>"+esc(room)+" ｜ 已加入 "+state.order.length+" 人 ｜ 状态：等待房主开始";
+    document.getElementById("opbtns").innerHTML=
+      (meId===state.hostId)
+        ? `<button class="btn green" onclick="startGame()">开始游戏（当前 ${state.order.length} 人）</button><span class="tip">你是房主，等人到齐后点这里开打</span>`
+        : `<span class="tip">已加入房间，等房主点“开始游戏”…</span>`;
+    document.getElementById("selinfo").innerHTML="";
+    document.getElementById("pending").style.display="none";
+    document.getElementById("log").innerHTML=state.log.slice(-20).map(x=>`<div>${esc(x)}</div>`).join("");
+    return;
+  }
+  const mep=me();
+  const turnP=currentTurnPlayer();
+  document.getElementById("topbar").style.display="flex";
+  document.getElementById("topbar").innerHTML=
+    "<b>回合：</b>"+esc(turnP?turnP.name:"-")+" ｜ 轮次："+state.turnCount+
+    " ｜ 你："+esc(meName)+" ｜ 手牌："+(mep?mep.hand.length:0)+"张";
+  // 玩家区
+  const ph=document.getElementById("players");
+  let html="";
+  state.order.forEach(pid=>{
+    const p=state.players[pid]; if(!p) return;
+    const isMe=pid===meId;
+    const r=p.role?p.role.name:"—";
+    const e=p.equip?p.equip.name:"—";
+    html+=`<div class="ply ${isMe?"me":""}">
+      <div class="nm">${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}</div>
+      <div class="hpwrap"><div class="hpbar" style="width:${p.hp*10}%"></div></div>
+      <div style="font-size:13px">HP <b>${p.hp}</b>/10</div>
+      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+p.role.atk+")"):""}</span>
+           <span class="slot">装备：<b>${esc(e)}</b></span></div>
+      <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb:""):""}</div>
+      <div class="hand">${handHtml(p,isMe)}</div>
+    </div>`;
+  });
+  ph.innerHTML=html;
+  // 中央：场地/怪物/牌堆
+  const c=document.getElementById("center");
+  let ch=`<div class="slot" style="min-width:150px">场地：<b>${state.field?esc(state.field.name):"—"}</b><br><span class="tip">${state.field?esc(FIELDS[state.field.name].desc):""}</span>${state.fieldCooldown>0?"<br><span style='color:#c62828'>已失效"+state.fieldCooldown+"回合</span>":""}</div>`;
+  if(state.monster) ch+=`<div class="slot" style="border-color:#c62828">怪物：<b>叶亮</b> HP ${state.monster.hp}/${state.monster.maxHp}<br><span class="tip">所有玩家可攻击</span></div>`;
+  ch+=`<div class="slot">抽牌堆：<b>${state.drawPile.length}</b>张</div>
+       <div class="slot">弃牌堆：<b>${state.discardPile.length}</b>张</div>`;
+  c.innerHTML=ch;
+  // pending提示
+  const pd=document.getElementById("pending");
+  if(state.pending){
+    const pk=state.pending;
+    let h=`<b>等待响应：</b>`;
+    if(pk.type==="attack"){
+      if(pk.to===meId){ h+=`${esc(state.players[pk.from].name)} 攻击你(${pk.dmg}伤害)。`+
+        `<button class="btn blue" onclick="respondFlash()">打出闪</button>
+         <button class="btn red" onclick="respondTake()">承受伤害</button>`; }
+      else{ h+=`${esc(state.players[pk.from].name)} 正在攻击 ${esc(state.players[pk.to].name)}，等待其响应…`; }
+    }else{
+      if(pk.from===meId){
+        h+=`你打出【${esc(pk.card.name)}】${pk.canceled?"(已被反制!)":""}。`+
+          `<button class="btn green" onclick="respondTrickOk()">确认生效</button>`;
+      }else{
+        h+=`${esc(pk.fromName||state.players[pk.from].name)} 打出锦囊【${esc(pk.card.name)}】。可反制：`+
+          `<button class="btn orange" onclick="respondTrickVeto()">校长出面反制</button>`+
+          (mep&&mep.role&&mep.role.name==="懂东方"?`<span class="tip">(懂东方可弃任意锦囊反制)</span>`:"");
+      }
+    }
+    pd.innerHTML=h; pd.style.display="block";
+  } else { pd.style.display="none"; }
+  // 操作按钮
+  renderOp(mep);
+  // 日志
+  document.getElementById("log").innerHTML=state.log.slice(-40).map(x=>`<div>${esc(x)}</div>`).join("");
+  document.getElementById("log").scrollTop=1e9;
+}
+function handHtml(p,isMe){
+  if(!isMe){ return `<div class="card back">${p.hand.length} 张</div>`; }
+  return p.hand.map((c,i)=>{
+    const t=cardType(c);
+    const d=ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{};
+    const info=t==="role"?("攻"+d.atk):d.desc||"";
+    const sel=(i===selIdx)?"sel":"";
+    return `<div class="card ${t} ${sel}" onclick="selectCard(${i})">
+      <span class="letter">${c.letter}</span>
+      <b>${esc(c.name)}</b><br><span class="tip">${esc(info)}</span></div>`;
+  }).join("");
+}
+function selectCard(i){ selIdx=(selIdx===i?-1:i); render(); }
+function renderOp(mep){
+  const b=document.getElementById("opbtns");
+  if(!mep){ b.innerHTML=""; return; }
+  const mine=state.turn===meId;
+  const pending=!!state.pending;
+  const sel=mep.hand[selIdx];
+  let info=sel?("已选："+sel.name+"("+cardType(sel)+")"+ (ROLES[sel.name]?" 攻击"+ROLES[sel.name].atk:"")):"";
+  let h="";
+  if(mine){
+    h+=`<button class="btn" onclick="playSelected()" ${pending||!sel?"disabled":""}>出牌</button>`;
+    h+=`<button class="btn red" onclick="attackAction()" ${pending?"disabled":""}>攻击${(state.monster?"(可打怪)":"")}</button>`;
+    h+=`<button class="btn blue" onclick="skill1Action()" ${pending?"disabled":""}>技能1</button>`;
+    h+=`<button class="btn orange" onclick="comboAction()" ${pending?"disabled":""}>连携</button>`;
+    h+=`<button class="btn green" onclick="endTurn()" ${pending?"disabled":""}>结束回合</button>`;
+  } else {
+    h+=`<span class="tip">轮到 ${esc(currentTurnPlayer()?currentTurnPlayer().name:"")} 行动。你是防守方：被攻击时可打闪，别人出锦囊时可反制。</span>`;
+  }
+  b.innerHTML=h;
+  document.getElementById("selinfo").innerHTML=info;
+}
+function addLog(m){ if(!state) return; state.log.push(m); if(state.log.length>40) state.log.splice(0,state.log.length-40); }
+
+/* ============ 加入 & 订阅 ============ */
+async function join(){
+  room=document.getElementById("in_room").value.trim()||"lanyin1";
+  meName=document.getElementById("in_name").value.trim()||"玩家"+Math.floor(Math.random()*900+100);
+  meId=localStorage.getItem("lanyin_pid_"+room)||uid();
+  localStorage.setItem("lanyin_pid_"+room,meId);
+  // 读取/创建房间
+  let {data}=await sb.from("games").select("*").eq("id",room).maybeSingle();
+  if(!data){
+    state=newGame(); state.v=0;
+    state.hostId=meId; state.status="waiting";
+    state.players[meId]={id:meId,name:meName,hp:10,hand:[],role:null,equip:null,hasAttacked:false,attackCount:0,dmgThisTurn:0,roleJustPlayed:false,dead:false};
+    state.order=[meId];
+    addLog(meName+"创建了房间(房主)");
+    const ok=await pushState();
+    if(!ok){ alert("建房间失败，请检查Supabase是否已执行SQL"); return; }
+  } else {
+    state=JSON.parse(data.state);
+    if(!state.players[meId]){ // 新人加入
+      state.players[meId]={id:meId,name:meName,hp:10,hand:[],role:null,equip:null,hasAttacked:false,attackCount:0,dmgThisTurn:0,roleJustPlayed:false,dead:false};
+      state.order.push(meId);
+      addLog(meName+"加入了游戏");
+      await doCommit();
+    } else { state.players[meId].name=meName; await doCommit(); }
+  }
+  subscribe();
+  await refresh();
+  render();
+}
+// 房主点击开始游戏：所有人发4张牌，进入第一回合
+async function startGame(){
+  if(!state) return;
+  if(state.status!=="waiting") return;
+  if(meId!==state.hostId){ alert("只有房主可以开始游戏"); return; }
+  if(state.order.length<1){ alert("至少需要1名玩家"); return; }
+  state.status="playing";
+  state.turn=state.order[0];
+  addLog("游戏开始！每人发4张手牌");
+  for(const id in state.players){
+    draw(state.players[id],4);
+    addLog(state.players[id].name+"开局抽4张");
+  }
+  const ok=await doCommit();
+  if(ok) advanceTurn();
+}
+function subscribe(){
+  if(sub) return;
+  sub=sb.channel("game-"+room)
+    .on("postgres_changes",{event:"UPDATE",schema:"public",table:"games",filter:"id=eq."+room},payload=>{
+      const s=JSON.parse(payload.new.state);
+      // 只接管别人造成的变化(自己提交的会由本地渲染，这里防覆盖本地选中)
+      state=s; render();
+    })
+    .subscribe();
+}
+
+/* ============ 启动时自动读URL参数(方便分享：?room=xxx) ============ */
+const q=new URLSearchParams(location.search);
+if(q.get("room")) document.getElementById("in_room").value=q.get("room");
+
+/*
+【如何新增卡牌】
+1. 在上方 ROLES/EQUIPS/TRICKS/FIELDS 表里加一行，格式同其他卡。
+2. 若它有特殊效果，在 playSelected / applyTrick / attackAction 等函数里
+   加一个 if(name==="新卡"){...} 分支即可。
+3. 牌库会自动加入这张牌并重新补齐到51张。
+*/
+</script>
+</body>
+</html>
