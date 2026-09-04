@@ -56,6 +56,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </div>
 
 <div id="pending" style="display:none"></div>
+<div id="discardbar" style="display:none;background:#e8f5e9;border:1px solid #81c784;border-radius:8px;padding:10px;margin:8px 0"></div>
 <div class="bar" id="topbar" style="display:none"></div>
 <div id="players"></div>
 <div id="center"></div>
@@ -140,7 +141,7 @@ const FIELDS = {
 /* ============ 工具 ============ */
 let uid = ()=> Math.random().toString(36).slice(2,10);
 function shuffle(a){ for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
-function makeCard(name){ return {name, letter:"ABC"[Math.floor(Math.random()*3)], id:uid()}; }
+function makeCard(name){ const d=ROLES[name]||{}; return {name, letter:"ABC"[Math.floor(Math.random()*3)], id:uid(), atk:d.type==="role"?d.atk:undefined}; }
 function cardInfo(c){ const d = ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{}; return d; }
 function cardType(c){ const d=cardInfo(c); return d.type||"trick"; }
 
@@ -150,8 +151,10 @@ function buildDeckNames(){
   Object.keys(ROLES).forEach(n=>d.push(n));        // 16角色
   Object.keys(FIELDS).forEach(n=>d.push(n));       // 5场地
   Object.keys(EQUIPS).forEach(n=>d.push(n));       // 6装备
+  d.push("权威");                                   // 懂东方专属装备 多1张
   ["闪","闪"].forEach(n=>d.push(n));               // 闪至少2张
   Object.keys(TRICKS).forEach(n=>{ if(n!=="闪") d.push(n); }); // 其余锦囊各1
+  ["文艺汇演","抢零食大会","寻视","发怒"].forEach(n=>d.push(n)); // 懂东方专属锦囊 各多1张
   const fill=[...Object.keys(EQUIPS),...Object.keys(TRICKS)];
   while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]); // 随机补到51
   return shuffle(d);
@@ -267,6 +270,21 @@ function discardHandAt(p,idx){
   state.discardPile.push(p.hand[idx]); p.hand.splice(idx,1);
 }
 function findInDiscard(name){ const i=state.discardPile.findIndex(c=>c.name===name); if(i>=0){const c=state.discardPile.splice(i,1)[0]; return c;} return null; }
+/* 自选弃牌请求：需要我先弃牌时返回true */
+function mustDiscardFirst(){
+  const dr=state.discardReq;
+  return !!(dr && dr.need.indexOf(meId)>=0 && dr.done.indexOf(meId)<0);
+}
+function discardByReq(i){
+  const dr=state.discardReq; if(!dr) return;
+  const p=me();
+  if(dr.need.indexOf(meId)<0 || dr.done.indexOf(meId)>=0) return;
+  discardHandAt(p,i);
+  dr.done.push(meId);
+  addLog(p.name+"弃了1张牌");
+  if(dr.done.length>=dr.need.length){ state.discardReq=null; addLog("弃牌完成"); }
+  commitNow();
+}
 
 /* ============ 攻击力计算 ============ */
 function calcAtk(p,target){
@@ -320,11 +338,12 @@ async function onPlayRole(p, card){
   }
   // ---- 坤磊：抽2 ----
   if(card.name==="坤磊"){ draw(p,2); addLog(p.name+"上场抽2张牌"); }
-  // ---- 朱雍森：所有玩家弃1张 ----
+  // ---- 朱雍森：除自己外所有玩家各弃1张(自选) ----
   if(card.name==="朱雍森"){
-    for(const id in state.players){
-      const q=state.players[id];
-      if(q.hand.length){ discardHandAt(q,q.hand.length-1); addLog(q.name+"弃1张牌"); }
+    const need=Object.keys(state.players).filter(id=>id!==p.id && state.players[id].hand.length>0);
+    if(need.length){
+      state.discardReq={fromId:p.id, need, done:[]};
+      addLog("朱雍森上场："+need.map(id=>state.players[id].name).join("、")+"需要各弃一张牌");
     }
   }
   // ---- 沈毅：交换手牌 ----
@@ -346,6 +365,7 @@ async function onPlayRole(p, card){
 /* ============ 打出/装备/场地牌 ============ */
 async function playSelected(){
   if(!state || state.pending) { alert("当前有等待响应的操作"); return; }
+  if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
   const p=me();
   if(state.turn!==meId){ alert("不是你的回合"); return; }
   // 文艺汇演(懂东方版)：其他玩家无法出牌
@@ -401,6 +421,7 @@ async function commitNow(){ await doCommit(); }
 /* ============ 攻击 ============ */
 async function attackAction(){
   if(!state||state.pending){alert("有操作在等待响应");return;}
+  if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
   const p=me();
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色，无法攻击");return;}
@@ -446,6 +467,7 @@ function maxAttack(p){
   return m;
 }
 function attackMonster(p){
+  if(!state.monster) return;
   let dmg=calcAtk(p,null);
   state.monster.hp-=dmg;
   p.dmgThisTurn=(p.dmgThisTurn||0)+dmg;
@@ -482,9 +504,10 @@ function resolveHit(from,target,dmg){
     const L=judge(from.id);
     if(L==="C"){ from.canAtkAgain=true; addLog("廖宇判定C，可再攻击一次"); }
   }
-  // 朱雍森连携：目标弃一张
+  // 朱雍森连携：目标自选弃一张
   if(from.role && from.role.name==="朱雍森" && comboActive(from) && target.hand.length){
-    discardHandAt(target,target.hand.length-1); addLog("朱雍森连携："+target.name+"弃1张牌");
+    state.discardReq={fromId:from.id, need:[target.id], done:[]};
+    addLog("朱雍森连携："+target.name+"需要弃一张牌");
   }
   afterAttackHit(from,target);
 }
@@ -498,6 +521,7 @@ function afterAttackHit(from,target){
 /* ============ 技能1 ============ */
 async function skill1Action(){
   if(!state||state.pending){alert("有操作在等待响应");return;}
+  if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
   const p=me();
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色");return;}
@@ -507,10 +531,12 @@ async function skill1Action(){
     p.drunk=true; p.skipNextTurn=true;
     addLog(p.name+"喝酒：下次攻击+2，但下一个自己的回合直接结束");
   }else if(n==="李金仙"){
+    if(p.lijinUsed){ alert("李金仙的技能本回合已使用过"); return; }
     const ids=Object.keys(state.players);
     const t=await ask("选择目标玩家，使其受到自己攻击力的伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+(state.players[id].role?"(攻"+state.players[id].role.atk+")":"(无角色0)"),value:String(i+1)})));
     const k=parseInt(t||"0")-1;
     if(ids[k]){
+      p.lijinUsed=true;
       const q=state.players[ids[k]];
       const d=q.role?q.role.atk:0;
       if(q.invuln){ addLog(q.name+"有陈天宝铁壁保护，本次无效"); }
@@ -528,6 +554,7 @@ async function skill1Action(){
 /* ============ 连携 ============ */
 async function comboAction(){
   if(!state||state.pending){alert("有操作在等待响应");return;}
+  if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
   const p=me();
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色");return;}
@@ -608,6 +635,7 @@ async function comboYao(p,why){
 
 /* ============ 锦囊生效 ============ */
 async function applyTrick(p,card){
+  state.discardPile.push(card); // 用掉的锦囊必须进弃牌堆，保证牌数守恒
   const n=card.name;
   const isDong=(p.role && p.role.name==="懂东方");
   if(n==="henshin"){
@@ -688,7 +716,7 @@ function turnBegin(p){
   addLog("—— "+p.name+" 的回合开始 ——");
   // 王球新喝酒的代价：本回合直接结束
   if(p.skipNextTurn){ p.skipNextTurn=false; addLog(p.name+"因喝酒代价，本回合直接结束"); endTurn(); return; }
-  p.hasAttacked=false; p.attackCount=0; p.canAtkAgain=false; p.dmgThisTurn=0;
+  p.hasAttacked=false; p.attackCount=0; p.canAtkAgain=false; p.dmgThisTurn=0; p.lijinUsed=false;
   p.roleJustPlayed=false; // 过了自己的回合，角色可攻击了
   p.yingFreeCombo=false;
   if(p.artLock){ p.artLock=false; addLog(p.name+"的文艺汇演结束，其他人可恢复行动"); }
@@ -707,6 +735,7 @@ function turnBegin(p){
 function endTurn(){
   const p=currentTurnPlayer();
   if(!p) return;
+  if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
   // 弃到3张
   while(p.hand.length>3) discardHandAt(p,0);
   addLog(p.name+"回合结束，手牌弃至3张");
@@ -772,7 +801,7 @@ async function respondTrickOk(){ // 出锦囊者确认生效
   const pk=state.pending;
   const from=state.players[pk.from];
   state.pending=null;
-  if(pk.canceled){ addLog("锦囊【"+pk.card.name+"】被反制无效"); }
+  if(pk.canceled){ state.discardPile.push(pk.card); addLog("锦囊【"+pk.card.name+"】被反制无效，进入弃牌堆"); }
   else{ await applyTrick(from,pk.card); return; }
   commitNow();
 }
@@ -837,8 +866,8 @@ function render(){
       <div class="nm">${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}</div>
       <div class="hpwrap"><div class="hpbar" style="width:${p.hp*10}%"></div></div>
       <div style="font-size:13px">HP <b>${p.hp}</b>/10</div>
-      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+p.role.atk+")"):""}</span>
-           <span class="slot">装备：<b>${esc(e)}</b></span></div>
+      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+(p.role.atk??0)+")"):""}</span>
+           <span class="slot">装备：<b>${esc(e)}</b>${p.equip?`<br><span class="tip">${esc((EQUIPS[p.equip.name]||{}).desc||"")}</span>`:""}</span></div>
       <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb:""):""}</div>
       <div class="hand">${handHtml(p,isMe)}</div>
     </div>`;
@@ -847,7 +876,7 @@ function render(){
   // 中央：场地/怪物/牌堆
   const c=document.getElementById("center");
   let ch=`<div class="slot" style="min-width:150px">场地：<b>${state.field?esc(state.field.name):"—"}</b><br><span class="tip">${state.field?esc(FIELDS[state.field.name].desc):""}</span>${state.fieldCooldown>0?"<br><span style='color:#c62828'>已失效"+state.fieldCooldown+"回合</span>":""}</div>`;
-  if(state.monster) ch+=`<div class="slot" style="border-color:#c62828">怪物：<b>叶亮</b> HP ${state.monster.hp}/${state.monster.maxHp}<br><span class="tip">所有玩家可攻击</span></div>`;
+  if(state.monster && state.monster.hp>0) ch+=`<div class="slot" style="border-color:#c62828">怪物：<b>叶亮</b> HP ${state.monster.hp}/${state.monster.maxHp||5}<br><span class="tip">所有玩家可攻击</span></div>`;
   ch+=`<div class="slot">抽牌堆：<b>${state.drawPile.length}</b>张</div>
        <div class="slot">弃牌堆：<b>${state.discardPile.length}</b>张</div>`;
   c.innerHTML=ch;
@@ -873,6 +902,17 @@ function render(){
     }
     pd.innerHTML=h; pd.style.display="block";
   } else { pd.style.display="none"; }
+  // 自选弃牌提示
+  const db=document.getElementById("discardbar");
+  const dr=state.discardReq;
+  if(dr && dr.need.indexOf(meId)>=0 && dr.done.indexOf(meId)<0){
+    const p=me();
+    let h=`<b>你需要弃 1 张牌：</b>`;
+    h+=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">`;
+    p.hand.forEach((c,i)=>{ h+=`<button class="btn" onclick="discardByReq(${i})">${esc(c.name)}</button>`; });
+    h+=`</div>`;
+    db.innerHTML=h; db.style.display="block";
+  } else { db.style.display="none"; }
   // 操作按钮
   renderOp(mep);
   // 日志
