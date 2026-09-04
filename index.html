@@ -151,11 +151,10 @@ function buildDeckNames(){
   Object.keys(ROLES).forEach(n=>d.push(n));        // 16角色
   Object.keys(FIELDS).forEach(n=>d.push(n));       // 5场地
   Object.keys(EQUIPS).forEach(n=>d.push(n));       // 6装备
-  d.push("权威");                                   // 懂东方专属装备 多1张
   ["闪","闪"].forEach(n=>d.push(n));               // 闪至少2张
   Object.keys(TRICKS).forEach(n=>{ if(n!=="闪") d.push(n); }); // 其余锦囊各1
-  ["文艺汇演","抢零食大会","寻视","发怒"].forEach(n=>d.push(n)); // 懂东方专属锦囊 各多1张
-  const fill=[...Object.keys(EQUIPS),...Object.keys(TRICKS)];
+  const dongEx=["权威","文艺汇演","抢零食大会","寻视","发怒"]; // 懂东方专属牌：至多1张(不再额外加，也不参与随机补牌)
+  const fill=[...Object.keys(EQUIPS),...Object.keys(TRICKS)].filter(n=>dongEx.indexOf(n)<0);
   while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]); // 随机补到51
   return shuffle(d);
 }
@@ -232,7 +231,8 @@ function comboActive(p){
   if(!p.role) return false;
   if(p.role.name==="懂东方") return false;
   if(p.yingFreeCombo) return true;
-  return state.field && state.fieldCooldown<=0 && state.field.name===p.role.field;
+  const need=ROLES[p.role.name]?ROLES[p.role.name].field:null;
+  return !!(state.field && state.fieldCooldown<=0 && need && state.field.name===need);
 }
 function homeActive(){ return state.field && state.fieldCooldown<=0 && state.field.name==="家"; }
 function equipActive(p){ return !(homeActive() && !(p.equip&&p.equip.name==="脸皮")); }
@@ -284,10 +284,21 @@ function discardByReq(i){
   const p=me();
   if(dr.need.indexOf(meId)<0 || dr.done.indexOf(meId)>=0) return;
   discardHandAt(p,i);
-  dr.done.push(meId);
-  addLog(p.name+"弃了1张牌");
-  if(dr.done.length>=dr.need.length){ state.discardReq=null; addLog("弃牌完成"); }
-  commitNow();
+  if(dr.count){ // 回合结束自选弃多张
+    dr.count--;
+    addLog(p.name+"弃了1张牌(还需弃"+dr.count+"张)");
+    if(dr.count<=0){
+      state.discardReq=null;
+      const cb=_afterDiscard; _afterDiscard=null;
+      if(cb){ cb(); return; } // 结束回合的后续结算会自行提交
+    }
+    commitNow();
+  }else{ // 每人弃1张(朱雍森等)
+    dr.done.push(meId);
+    addLog(p.name+"弃了1张牌");
+    if(dr.done.length>=dr.need.length){ state.discardReq=null; addLog("弃牌完成"); }
+    commitNow();
+  }
 }
 
 /* ============ 攻击力 / 伤害 / 死亡 统一处理 ============ */
@@ -430,7 +441,7 @@ async function playSelected(){
   const type=cardType(card);
   if(card.name==="闪"){ alert("闪是被攻击时响应的牌，不能主动打出"); return; }
   if(card.name==="校长出面"){ alert("校长出面是响应别人出锦囊时使用的牌"); return; }
-  if(type==="role"){ await onPlayRole(p,card); p.hand.splice(selIdx,1); selIdx=-1; }
+  if(type==="role"){ const c=p.hand.splice(selIdx,1)[0]; await onPlayRole(p,c); selIdx=-1; }
   else if(type==="field"){
     if(state.field){ state.discardPile.push(state.field); addLog("旧场地"+state.field.name+"进入弃牌堆"); }
     state.field=card; p.hand.splice(selIdx,1); selIdx=-1;
@@ -516,7 +527,7 @@ function maxAttack(p){
   if(p.role && p.role.name==="廖宇" && p.canAtkAgain) m=2;
   return m;
 }
-function attackMonster(p, healBack){
+function attackMonster(p){
   if(!state.monster) return;
   if(p.roleJustPlayed){ alert("刚上场的角色本回合不能攻击"); return; }
   // 攻击次数限制同样适用于打怪
@@ -526,7 +537,7 @@ function attackMonster(p, healBack){
   state.monster.hp-=dmg;
   p.dmgThisTurn=(p.dmgThisTurn||0)+dmg;
   addLog(p.name+"攻击怪物叶亮，造成"+dmg+"伤害");
-  if(healBack){ heal(p,dmg); addLog("抢零食大会：回复"+dmg+"点血"); }
+  heal(p,dmg); addLog(p.name+"攻击怪物回复"+dmg+"点血");
   if(state.monster.hp<=0){ addLog("怪物叶亮被击败！"); state.monster=null; }
   afterAttackHit(p,null);
   commitNow();
@@ -549,8 +560,8 @@ function resolveHit(from,target,dmg){
     const L=judge(from.id);
     if(L==="A"||L==="C"){ const c=target.hand.splice(Math.floor(Math.random()*target.hand.length),1)[0]; from.hand.push(c); addLog("顺手判定"+L+"，"+from.name+"拿走"+target.name+"的一张"+c.name); }
   }
-  // 叶子绿连携：攻击同时回血
-  if(from.role && from.role.name==="叶子绿" && from.leafCombo){
+  // 叶子绿连携：攻击同时回血(需场地仍在)
+  if(from.role && from.role.name==="叶子绿" && from.leafCombo && comboActive(from)){
     heal(from,roleAtk(from));
     addLog("叶子绿连携：攻击同时回复"+roleAtk(from)+"点血");
   }
@@ -614,7 +625,7 @@ async function comboAction(){
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色");return;}
   if(p.role.name==="懂东方"){alert("懂东方没有场地连携");return;}
-  if(!comboActive(p)){ alert("连携需要场地【"+p.role.field+"】在场"+(p.yingFreeCombo?"(英真本回合可无视场地)":"")); return; }
+  if(!comboActive(p)){ alert("连携需要场地【"+(ROLES[p.role.name]?ROLES[p.role.name].field:"?")+"】在场"+(p.yingFreeCombo?"(英真本回合可无视场地)":"")); return; }
   const n=p.role.name;
   if(n==="叶子绿"){
     p.leafCombo=true; addLog(p.name+"激活连携：本回合可同时攻击和回血");
@@ -743,7 +754,7 @@ async function applyTrick(p,card){
     else{
       state.monster={name:"叶亮",hp:5,maxHp:5};
       addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物并回血");
-      attackMonster(p,true);
+      attackMonster(p);
     }
   }else if(n==="寻视"){
     if(isDong){
@@ -779,6 +790,9 @@ function turnBegin(p){
   p.hasAttacked=false; p.attackCount=0; p.canAtkAgain=false; p.dmgThisTurn=0; p.lijinUsed=false;
   p.roleJustPlayed=false; // 过了自己的回合，角色可攻击了
   p.yingFreeCombo=false;
+  // 重置各角色"本回合有效"的连携激活标记(避免离开场地后效果残留)
+  p.leafCombo=false; p.doubleAttack=false; p.kunHome=false; p.tangGuarded=false;
+  p.zhuCombo=false; p.liaoCombo=false; p.xiangCombo=false; p.shenCombo=false; p.rage=0;
   if(p.artLock){ p.artLock=false; addLog(p.name+"的文艺汇演结束，其他人可恢复行动"); }
   if(p.invuln){ p.invuln=false; addLog(p.name+"的陈天宝铁壁到期解除"); }
   // 廖宇连携：其他玩家回合开始扣1血
@@ -792,6 +806,7 @@ function turnBegin(p){
   draw(p,n);
   addLog(p.name+"抽"+n+"张牌");
 }
+let _afterDiscard=null; // 自选弃牌完成后的回调(不进state，只在本地执行)
 function endTurn(){
   const p=currentTurnPlayer();
   if(!p) return;
@@ -799,9 +814,21 @@ function endTurn(){
   if(p.dead){ // 已死亡玩家：直接轮到下家，不弃牌不结算场地
     state.turn=nextPlayerId(p.id); state.turnCount++; advanceTurn(); return;
   }
-  // 弃到3张
-  while(p.hand.length>3) discardHandAt(p,0);
-  addLog(p.name+"回合结束，手牌弃至3张");
+  // 回合结束：自选弃牌，直到手牌不超过3张
+  if(p.hand.length>3){
+    const cnt=p.hand.length-3;
+    state.discardReq={fromId:p.id, need:[p.id], done:[], count:cnt};
+    _afterDiscard=finishEndTurn;
+    addLog("回合结束：请自选弃掉"+cnt+"张牌，让手牌不超过3张");
+    commitNow(); render();
+    return;
+  }
+  finishEndTurn();
+}
+function finishEndTurn(){
+  _afterDiscard=null;
+  const p=currentTurnPlayer();
+  if(!p) return;
   // 场地效果
   const lp = p.equip && p.equip.name==="脸皮";
   if(fieldOn() && !lp){
@@ -931,7 +958,7 @@ function render(){
       <div style="font-size:13px">HP <b>${p.hp}</b>/10${p.dead?'<span style="color:#c62828">（出局）</span>':""}</div>
       <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+roleAtk(p)+")"):""}</span>
            <span class="slot">装备：<b>${esc(e)}</b>${p.equip?`<br><span class="tip">${esc((EQUIPS[p.equip.name]||{}).desc||"")}</span>`:""}</span></div>
-      <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb:""):""}</div>
+      <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?((ROLES[p.role.name].field&&ROLES[p.role.name].field!=="特殊"?"【连携场地："+ROLES[p.role.name].field+"】":"")+ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb):""):""}</div>
       <div class="hand">${handHtml(p,isMe)}</div>
     </div>`;
   });
@@ -970,7 +997,8 @@ function render(){
   const dr=state.discardReq;
   if(dr && dr.need.indexOf(meId)>=0 && dr.done.indexOf(meId)<0){
     const p=me();
-    let h=`<b>你需要弃 1 张牌：</b>`;
+    const needN=dr.count?dr.count:1;
+    let h=`<b>你需要自选弃 ${needN} 张牌：</b>`;
     h+=`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">`;
     p.hand.forEach((c,i)=>{ h+=`<button class="btn" onclick="discardByReq(${i})">${esc(c.name)}</button>`; });
     h+=`</div>`;
@@ -987,7 +1015,7 @@ function handHtml(p,isMe){
   return p.hand.map((c,i)=>{
     const t=cardType(c);
     const d=ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{};
-    const info=t==="role"?("攻"+d.atk):d.desc||"";
+    const info=t==="role"?("攻"+d.atk+(d.field&&d.field!=="特殊"?" ·连携需"+d.field:"")):d.desc||"";
     const sel=(i===selIdx)?"sel":"";
     return `<div class="card ${t} ${sel}" onclick="selectCard(${i})">
       <span class="letter">${c.letter}</span>
