@@ -168,7 +168,7 @@ async function refresh(){
   const {data}=await sb.from("games").select("*").eq("id",room).maybeSingle();
   if(data){
     const s=JSON.parse(data.state);
-    if((s.v||0)>=(state.v||0)){ state=s; render(); } // 服务器比本地新才覆盖，避免盖掉自己刚提交的
+    if((s.v||0)>=(state.v||0)){ state=s; repairState(); render(); } // 服务器比本地新才覆盖，避免盖掉自己刚提交的
   }
 }
 /* 页面内选择弹层（替代 prompt，手机也能用） */
@@ -237,6 +237,7 @@ function fieldOn(){ return state.field && state.fieldCooldown<=0; }
 
 /* ============ 抽/弃/判定 ============ */
 function draw(p,n){
+  if(!p || p.dead) return; // 死亡玩家不能再抽牌
   for(let i=0;i<n;i++){
     if(state.drawPile.length===0 && state.discardPile.length>0){
       state.drawPile=shuffle(state.discardPile.slice()); state.discardPile=[];
@@ -258,7 +259,7 @@ function judge(byId){ // 判定：抽一张看右上角字母；樊宇在场时�
       const fx=state.players[id];
       if(fx.role && fx.role.name==="樊宇" && id!==byId){
         const j=state.players[byId];
-        if(j && j.hp>0){ j.hp=Math.max(0,j.hp-2); addLog(j.name+"判定时受樊宇影响扣2血"); }
+        if(j && j.hp>0){ damage(j,2); addLog(j.name+"判定时受樊宇影响扣2血"); }
       }
     }
   }
@@ -286,9 +287,55 @@ function discardByReq(i){
   commitNow();
 }
 
+/* ============ 攻击力 / 伤害 / 死亡 统一处理 ============ */
+/* 取角色当前攻击力(兼容旧数据没有atk字段的情况) */
+function roleAtk(p){
+  if(!p || !p.role) return 0;
+  const v=p.role.atk;
+  if(v!==undefined && !isNaN(v)) return v;
+  return (ROLES[p.role.name]||{}).atk || 0;
+}
+/* 造成伤害并处理死亡 */
+function damage(p,d){
+  if(!p || p.dead || !(d>0)) return;
+  p.hp=Math.max(0,p.hp-d);
+  if(p.hp<=0) onDeath(p);
+}
+/* 回复血量：死人不能回血，上限10 */
+function heal(p,h){
+  if(!p || p.dead || !(h>0)) return;
+  p.hp=Math.min(10,p.hp+h);
+}
+/* 标记死亡并清空该玩家的所有牌 */
+function markDead(p){
+  if(!p || p.dead) return;
+  p.dead=true; p.hp=0;
+  if(p.role){ state.discardPile.push(p.role); p.role=null; }
+  if(p.equip){ state.discardPile.push(p.equip); p.equip=null; }
+  if(p.hand.length){ p.hand.forEach(c=>state.discardPile.push(c)); p.hand=[]; }
+}
+function onDeath(p){
+  if(!p || p.dead) return;
+  markDead(p);
+  addLog(p.name+"血量归0，死亡出局！手牌/角色/装备全部进入弃牌堆");
+  // 若死的是当前回合玩家，直接结束他的回合
+  if(state && state.turn===p.id){ setTimeout(()=>{ if(state && currentTurnPlayer() && currentTurnPlayer().dead) endTurn(); },0); }
+}
+/* 修复旧房间数据：给角色牌补攻击力、标记hp为0的玩家为死亡 */
+function repairState(){
+  if(!state) return;
+  const fix=c=>{ if(c && c.name && cardType(c)==="role" && (c.atk===undefined||isNaN(c.atk))){ c.atk=(ROLES[c.name]||{}).atk||0; } };
+  state.drawPile.forEach(fix); state.discardPile.forEach(fix);
+  Object.values(state.players).forEach(p=>{
+    p.hand.forEach(fix);
+    if(p.role) fix(p.role);
+    if(p.hp<=0 && !p.dead) markDead(p);
+  });
+}
+
 /* ============ 攻击力计算 ============ */
 function calcAtk(p,target){
-  let a = p.role?p.role.atk:0;
+  let a = roleAtk(p);
   if(p.equip && equipActive(p)){
     const en=p.equip.name;
     if(en==="手机") a += (p.role.name==="相仿云飞"&&comboActive(p))?2:1;
@@ -301,7 +348,7 @@ function calcAtk(p,target){
   if(p.drunk) a+=2;             // 王球新喝酒
   // 沈毅连携：所受伤害忽略锦囊/装备附加
   if(target && target.role && target.role.name==="沈毅" && comboActive(target)){
-    a=p.role.atk;
+    a=roleAtk(p);
     if(p.role.name==="威神代尔"&&p.hp>5) a+=1;
   }
   return Math.max(0,a);
@@ -333,7 +380,7 @@ async function onPlayRole(p, card){
     if(ids.length){
       const t=await ask("选择要交换基础攻击力的玩家", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"("+state.players[id].role.name+" 攻"+state.players[id].role.atk+")",value:String(i+1)})));
       const k=parseInt(t||"0")-1;
-      if(ids[k]){ const q=state.players[ids[k]]; const tmp=q.role.atk; q.role.atk=p.role.atk; p.role.atk=tmp; addLog(p.name+"与"+q.name+"交换了基础攻击力"); }
+      if(ids[k]){ const q=state.players[ids[k]]; const tmp=roleAtk(q); q.role.atk=roleAtk(p); p.role.atk=tmp; addLog(p.name+"与"+q.name+"交换了基础攻击力"); }
     }
   }
   // ---- 坤磊：抽2 ----
@@ -434,10 +481,10 @@ async function attackAction(){
   }
   // 叶子绿技能1：攻击时可选择改为回血
   if(p.role.name==="叶子绿"){
-    const cho=await ask("叶子绿选择", [{label:"正常攻击",value:"1"},{label:"不攻击，回复"+p.role.atk+"点血",value:"2"}]);
+    const cho=await ask("叶子绿选择", [{label:"正常攻击",value:"1"},{label:"不攻击，回复"+roleAtk(p)+"点血",value:"2"}]);
     if(cho!=null && String(cho)==="2"){
-      p.hp=Math.min(10,p.hp+p.role.atk);
-      addLog(p.name+"选择不攻击，回复"+p.role.atk+"点血");
+      heal(p,roleAtk(p));
+      addLog(p.name+"选择不攻击，回复"+roleAtk(p)+"点血");
       commitNow(); return;
     }
     if(cho==null) return;
@@ -480,13 +527,13 @@ function attackMonster(p){
 function resolveHit(from,target,dmg){
   // 电子烟反伤
   if(target.equip && target.equip.name==="电子烟" && equipActive(target)){
-    from.hp=Math.max(0,from.hp-1); addLog("电子烟反伤："+target.name+"使"+from.name+"扣1血");
+    damage(from,1); addLog("电子烟反伤："+target.name+"使"+from.name+"扣1血");
   }
   // 陈天宝无敌
   if(target.invuln){ addLog(target.name+"处于陈天宝铁壁保护，本次伤害无效"); dmg=0; }
   // 樊宇连携：只受1伤
   if(target.role && target.role.name==="樊宇" && comboActive(target) && dmg>1){ dmg=1; addLog("樊宇连携生效，伤害降为1"); }
-  target.hp=Math.max(0,target.hp-dmg);
+  damage(target,dmg);
   from.dmgThisTurn=(from.dmgThisTurn||0)+dmg;
   addLog(from.name+"对"+target.name+"造成"+dmg+"伤害");
   // 顺手：判定AC拿对方一张牌
@@ -496,8 +543,8 @@ function resolveHit(from,target,dmg){
   }
   // 叶子绿连携：攻击同时回血
   if(from.role && from.role.name==="叶子绿" && from.leafCombo){
-    from.hp=Math.min(10,from.hp+from.role.atk);
-    addLog("叶子绿连携：攻击同时回复"+from.role.atk+"点血");
+    heal(from,roleAtk(from));
+    addLog("叶子绿连携：攻击同时回复"+roleAtk(from)+"点血");
   }
   // 廖宇：攻击后判定C可再攻击
   if(from.role && from.role.name==="廖宇"){
@@ -538,10 +585,10 @@ async function skill1Action(){
     if(ids[k]){
       p.lijinUsed=true;
       const q=state.players[ids[k]];
-      const d=q.role?q.role.atk:0;
+      const d=roleAtk(q);
       if(q.invuln){ addLog(q.name+"有陈天宝铁壁保护，本次无效"); }
-      else{ q.hp=Math.max(0,q.hp-d); p.dmgThisTurn=(p.dmgThisTurn||0)+d; addLog(p.name+"让"+q.name+"受到自己攻击力"+d+"伤害"); }
-      if(comboActive(p)){ p.role.atk+=1; addLog("李金仙连携生效，基础攻击力+1"); }
+      else{ damage(q,d); p.dmgThisTurn=(p.dmgThisTurn||0)+d; addLog(p.name+"让"+q.name+"受到自己攻击力"+d+"伤害"); }
+      if(comboActive(p)){ p.role.atk=roleAtk(p)+1; addLog("李金仙连携生效，基础攻击力+1"); }
     }
   }else if(n==="懂东方"){
     alert("懂东方的技能是【所有锦囊都可当作校长出面使用】。在别人打出锦囊时，点击\"锦囊反制\"即可(无需手中有校长出面)。");
@@ -567,7 +614,7 @@ async function comboAction(){
     const ids=Object.keys(state.players).filter(id=>id!==meId);
     const t=await ask("选择英真连携目标", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
     const k=parseInt(t||"0")-1;
-    if(ids[k]){ const q=state.players[ids[k]]; q.hp=Math.max(0,q.hp-3); addLog("英真对"+q.name+"造成3点伤害"); }
+    if(ids[k]){ const q=state.players[ids[k]]; damage(q,3); addLog("英真对"+q.name+"造成3点伤害"); }
     state.discardPile.push(p.role); p.role=null; p.yingFreeCombo=false;
     addLog("英真进入弃牌堆");
   }else if(n==="陈天宝"){
@@ -593,7 +640,7 @@ async function comboAction(){
         if(ids[k]===undefined||seen[k]) return; seen[k]=true;
         const q=state.players[ids[k]];
         if(q.invuln){addLog(q.name+"受铁壁保护");return;}
-        q.hp=Math.max(0,q.hp-dmg); p.dmgThisTurn=(p.dmgThisTurn||0)+dmg; addLog(p.name+"横扫"+q.name+"造成"+dmg+"伤害");
+        damage(q,dmg); p.dmgThisTurn=(p.dmgThisTurn||0)+dmg; addLog(p.name+"横扫"+q.name+"造成"+dmg+"伤害");
       });
       afterAttackHit(p,null);
     }
@@ -626,10 +673,10 @@ async function comboYao(p,why){
   const t=await ask(why+"：扣自己1血，对另一名玩家造成3点伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
   const k=parseInt(t||"0")-1;
   if(ids[k]){
-    p.hp=Math.max(0,p.hp-1);
+    damage(p,1);
     const q=state.players[ids[k]];
     if(q.invuln){ addLog(q.name+"受铁壁保护，无伤害"); }
-    else{ q.hp=Math.max(0,q.hp-3); addLog(why+"：姚九扣1血，对"+q.name+"造成3点伤害"); }
+    else{ damage(q,3); addLog(why+"：姚九扣1血，对"+q.name+"造成3点伤害"); }
   }
 }
 
@@ -651,17 +698,17 @@ async function applyTrick(p,card){
     if(ids[k]){ if(judge(p.id)==="A"){ state.players[ids[k]].skipNextTurn=true; addLog(state.players[ids[k]].name+"下一个回合跳过"); } }
   }else if(n==="囚徒困境"){
     const L=judge(p.id);
-    if(L==="A"){ p.hp=Math.min(10,p.hp+5); addLog("囚徒困境A：回5血"); }
+    if(L==="A"){ heal(p,5); addLog("囚徒困境A：回5血"); }
     else if(L==="B"){ draw(p,3); addLog("囚徒困境B：抽3张"); }
-    else{ p.hp=Math.max(0,p.hp-5); addLog("囚徒困境C：扣5血"); }
+    else{ damage(p,5); addLog("囚徒困境C：扣5血"); }
   }else if(n==="牛奶大会"){
-    for(const id in state.players){ state.players[id].hp=Math.min(10,state.players[id].hp+3); }
+    for(const id in state.players){ heal(state.players[id],3); }
     state.fieldCooldown=2;
     addLog("牛奶大会：所有玩家+3血，场地失效2回合");
   }else if(n==="食堂包子"){
     const L=judge(p.id);
-    if(L==="A"){ p.hp=Math.max(0,p.hp-1); addLog("食堂包子A：扣1血"); }
-    else{ p.hp=Math.min(10,p.hp+2); addLog("食堂包子"+L+"：回2血"); }
+    if(L==="A"){ damage(p,1); addLog("食堂包子A：扣1血"); }
+    else{ heal(p,2); addLog("食堂包子"+L+"：回2血"); }
   }else if(n==="教育局出手"){
     const L=judge(p.id);
     if(L==="A"){ for(const id in state.players){ const q=state.players[id]; if(q.role){ state.discardPile.push(q.role); q.role=null; } } addLog("教育局出手A：所有角色下场"); }
@@ -675,11 +722,11 @@ async function applyTrick(p,card){
       if(L==="A"||L==="C"){ addLog("姚九打电话判定"+L+"，立即触发连携"); await comboYao(p,"打电话触发连携"); }
     }
   }else if(n==="玩多媒体"){ p.playMedia=true; addLog("玩多媒体：下次攻击+1"); }
-  else if(n==="香香的早饭"){ p.hp=Math.min(10,p.hp+3); addLog("香香的早饭：回3血"); }
+  else if(n==="香香的早饭"){ heal(p,3); addLog("香香的早饭：回3血"); }
   else if(n==="文艺汇演"){
     p.artLock=true; addLog("文艺汇演：直到你的下一回合，其他玩家"+(isDong?"无法出牌":"无法攻击"));
   }else if(n==="抢零食大会"){
-    if(isDong){ p.hp=Math.min(10,p.hp+5); state.monster={name:"叶亮",hp:5,maxHp:5}; addLog("懂东方回5血并生成怪物叶亮(5血)"); }
+    if(isDong){ heal(p,5); state.monster={name:"叶亮",hp:5,maxHp:5}; addLog("懂东方回5血并生成怪物叶亮(5血)"); }
     else{
       state.monster={name:"叶亮",hp:5,maxHp:5};
       addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物");
@@ -712,7 +759,7 @@ async function applyTrick(p,card){
 /* ============ 回合流程 ============ */
 let turnDepth=0;
 function turnBegin(p){
-  if(!p) return;
+  if(!p || p.dead) return;
   addLog("—— "+p.name+" 的回合开始 ——");
   // 王球新喝酒的代价：本回合直接结束
   if(p.skipNextTurn){ p.skipNextTurn=false; addLog(p.name+"因喝酒代价，本回合直接结束"); endTurn(); return; }
@@ -724,7 +771,7 @@ function turnBegin(p){
   // 廖宇连携：其他玩家回合开始扣1血
   for(const id in state.players){
     const q=state.players[id];
-    if(q.role && q.role.name==="廖宇" && comboActive(q) && id!==p.id){ p.hp=Math.max(0,p.hp-1); addLog("廖宇连携："+p.name+"回合开始扣1血"); }
+    if(q.role && q.role.name==="廖宇" && comboActive(q) && id!==p.id){ damage(p,1); addLog("廖宇连携："+p.name+"回合开始扣1血"); }
   }
   // 抽牌
   let n=1;
@@ -736,6 +783,9 @@ function endTurn(){
   const p=currentTurnPlayer();
   if(!p) return;
   if(mustDiscardFirst()){ alert("请先弃一张牌"); return; }
+  if(p.dead){ // 已死亡玩家：直接轮到下家，不弃牌不结算场地
+    state.turn=nextPlayerId(p.id); state.turnCount++; advanceTurn(); return;
+  }
   // 弃到3张
   while(p.hand.length>3) discardHandAt(p,0);
   addLog(p.name+"回合结束，手牌弃至3张");
@@ -743,15 +793,15 @@ function endTurn(){
   const lp = p.equip && p.equip.name==="脸皮";
   if(fieldOn() && !lp){
     const f=state.field.name;
-    if(f==="厕所"){ p.hp=Math.max(0,p.hp-2); addLog("厕所："+p.name+"扣2血"); }
+    if(f==="厕所"){ damage(p,2); addLog("厕所："+p.name+"扣2血"); }
     else if(f==="终焉之地"){
       const cnt=Math.min(3,p.hand.length);
       for(let i=0;i<cnt;i++) discardHandAt(p,0);
       draw(p,cnt);
       addLog("终焉之地："+p.name+"弃"+cnt+"张并抽"+cnt+"张");
     }
-    else if(f==="寝室" && !p.hasAttacked){ p.hp=Math.min(10,p.hp+2); addLog("寝室："+p.name+"未攻击回2血"); }
-    else if(f==="教室" && (p.dmgThisTurn||0)<3){ p.hp=Math.max(0,p.hp-1); addLog("教室："+p.name+"本回合伤害不足3，扣1血"); }
+    else if(f==="寝室" && !p.hasAttacked){ heal(p,2); addLog("寝室："+p.name+"未攻击回2血"); }
+    else if(f==="教室" && (p.dmgThisTurn||0)<3){ damage(p,1); addLog("教室："+p.name+"本回合伤害不足3，扣1血"); }
   }
   // 坤磊传递
   if(p.role && p.role.name==="坤磊"){
@@ -863,10 +913,10 @@ function render(){
     const r=p.role?p.role.name:"—";
     const e=p.equip?p.equip.name:"—";
     html+=`<div class="ply ${isMe?"me":""}">
-      <div class="nm">${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}</div>
+      <div class="nm">${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}${p.dead?" ☠已死亡":""}</div>
       <div class="hpwrap"><div class="hpbar" style="width:${p.hp*10}%"></div></div>
-      <div style="font-size:13px">HP <b>${p.hp}</b>/10</div>
-      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+(p.role.atk??0)+")"):""}</span>
+      <div style="font-size:13px">HP <b>${p.hp}</b>/10${p.dead?'<span style="color:#c62828">（出局）</span>':""}</div>
+      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+roleAtk(p)+")"):""}</span>
            <span class="slot">装备：<b>${esc(e)}</b>${p.equip?`<br><span class="tip">${esc((EQUIPS[p.equip.name]||{}).desc||"")}</span>`:""}</span></div>
       <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb:""):""}</div>
       <div class="hand">${handHtml(p,isMe)}</div>
@@ -934,7 +984,7 @@ function handHtml(p,isMe){
 function selectCard(i){ selIdx=(selIdx===i?-1:i); render(); }
 function renderOp(mep){
   const b=document.getElementById("opbtns");
-  if(!mep){ b.innerHTML=""; return; }
+  if(!mep || mep.dead){ b.innerHTML=""; return; }
   const mine=state.turn===meId;
   const pending=!!state.pending;
   const sel=mep.hand[selIdx];
@@ -972,9 +1022,11 @@ async function join(){
     if(!ok){ alert("建房间失败，请检查Supabase是否已执行SQL"); return; }
   } else {
     state=JSON.parse(data.state);
+    repairState(); // 修复旧房间数据(补攻击力/标记死亡)
     if(!state.players[meId]){ // 新人加入
       state.players[meId]={id:meId,name:meName,hp:10,hand:[],role:null,equip:null,hasAttacked:false,attackCount:0,dmgThisTurn:0,roleJustPlayed:false,dead:false};
       state.order.push(meId);
+      if(state.status==="playing") draw(state.players[meId],4); // 游戏进行中加入也发4张
       addLog(meName+"加入了游戏");
       await doCommit();
     } else { state.players[meId].name=meName; await doCommit(); }
