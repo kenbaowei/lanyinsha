@@ -164,7 +164,9 @@ function buildDeckNames(){
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let room="lanyin1", meId="", meName="", state=null, sub=null, selIdx=-1;
 
+let _busy=false; // 正在弹窗选择目标时，暂停自动刷新，避免操作被覆盖
 async function refresh(){ 
+  if(_busy) return;
   const {data}=await sb.from("games").select("*").eq("id",room).maybeSingle();
   if(data){
     const s=JSON.parse(data.state);
@@ -174,6 +176,7 @@ async function refresh(){
 /* 页面内选择弹层（替代 prompt，手机也能用） */
 let _askRes=null, _askOpts=[];
 function ask(title, opts, withText){
+  _busy=true;
   return new Promise(res=>{
     _askRes=res; _askOpts=opts||[];
     document.getElementById("m_title").innerHTML=title;
@@ -186,12 +189,12 @@ function ask(title, opts, withText){
 }
 function pickChoice(i){
   const r=_askRes; if(!r) return;
-  _askRes=null; document.getElementById("modal").style.display="none";
+  _busy=false; _askRes=null; document.getElementById("modal").style.display="none";
   r(_askOpts[i] ? _askOpts[i].value : null);
 }
 function pickText(){
   const r=_askRes; if(!r) return;
-  _askRes=null; document.getElementById("modal").style.display="none";
+  _busy=false; _askRes=null; document.getElementById("modal").style.display="none";
   r(document.getElementById("m_text").value||"");
 }
 function modalCancel(){ pickChoice(-1); }
@@ -513,12 +516,17 @@ function maxAttack(p){
   if(p.role && p.role.name==="廖宇" && p.canAtkAgain) m=2;
   return m;
 }
-function attackMonster(p){
+function attackMonster(p, healBack){
   if(!state.monster) return;
+  if(p.roleJustPlayed){ alert("刚上场的角色本回合不能攻击"); return; }
+  // 攻击次数限制同样适用于打怪
+  if(p.attackCount>=maxAttack(p)){ alert("本回合已不能攻击"); return; }
+  p.attackCount=(p.attackCount||0)+1;
   let dmg=calcAtk(p,null);
   state.monster.hp-=dmg;
   p.dmgThisTurn=(p.dmgThisTurn||0)+dmg;
   addLog(p.name+"攻击怪物叶亮，造成"+dmg+"伤害");
+  if(healBack){ heal(p,dmg); addLog("抢零食大会：回复"+dmg+"点血"); }
   if(state.monster.hp<=0){ addLog("怪物叶亮被击败！"); state.monster=null; }
   afterAttackHit(p,null);
   commitNow();
@@ -667,10 +675,15 @@ async function comboAction(){
   commitNow();
 }
 async function comboYao(p,why){
-  // 姚九连携：扣自己1血，打别人3血
-  const ids=Object.keys(state.players).filter(id=>id!==p.id);
-  if(!ids.length){ alert("没有其他玩家"); return; }
-  const t=await ask(why+"：扣自己1血，对另一名玩家造成3点伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+  // 姚九连携：扣自己1血，打别人3血（必须选目标，不能跳过）
+  const ids=Object.keys(state.players).filter(id=>id!==p.id && !state.players[id].dead);
+  if(!ids.length){ alert("没有其他存活玩家，姚九连携无法使用"); return; }
+  let t=null;
+  while(t==null){
+    t=await ask(why+"：扣自己1血，对另一名玩家造成3点伤害", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    if(t==null) alert("姚九连携必须选择一个目标");
+  }
+  p=state.players[p.id]; // 弹窗期间可能被刷新，重新取最新玩家
   const k=parseInt(t||"0")-1;
   if(ids[k]){
     damage(p,1);
@@ -729,8 +742,8 @@ async function applyTrick(p,card){
     if(isDong){ heal(p,5); state.monster={name:"叶亮",hp:5,maxHp:5}; addLog("懂东方回5血并生成怪物叶亮(5血)"); }
     else{
       state.monster={name:"叶亮",hp:5,maxHp:5};
-      addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物");
-      attackMonster(p);
+      addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物并回血");
+      attackMonster(p,true);
     }
   }else if(n==="寻视"){
     if(isDong){
@@ -1055,6 +1068,7 @@ function subscribe(){
   if(sub) return;
   sub=sb.channel("game-"+room)
     .on("postgres_changes",{event:"UPDATE",schema:"public",table:"games",filter:"id=eq."+room},payload=>{
+      if(_busy) return; // 正在弹窗选择时不被覆盖
       const s=JSON.parse(payload.new.state);
       // 只接管别人造成的变化(自己提交的会由本地渲染，这里防覆盖本地选中)
       state=s; render();
