@@ -49,7 +49,8 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v1.9</span></h1>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.0</span>
+<span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
   昵称<input id="in_name" placeholder="你的昵称">
@@ -197,7 +198,38 @@ function pickText(){
   _busy=false; _askRes=null; document.getElementById("modal").style.display="none";
   r(document.getElementById("m_text").value||"");
 }
-function modalCancel(){ pickChoice(-1); }
+function modalCancel(){
+  const r=_askRes;
+  _busy=false; _askRes=null;
+  document.getElementById("modal").style.display="none";
+  if(r) r(null);
+}
+/* ============ 规则说明 / 卡牌大全(战斗中随时可看) ============ */
+function showRules(){
+  document.getElementById("m_title").innerHTML="📜 游戏规则";
+  document.getElementById("m_opts").innerHTML=`<div style="font-size:13px;line-height:1.7">
+<b>基础</b><br>· 每人10点血量(上限10，无法突破)<br>· 所有人共用一个抽牌堆和弃牌堆，打出的牌进弃牌堆<br>· 开局抽4张手牌；自己回合抽1张<br>· 回合结束时手牌不能超过3张(自选弃牌)<br><br>
+<b>区域</b><br>· 角色栏/装备栏：所有玩家可见，同时各只能有1张<br>· 场地栏：全游戏共用1张<br><br>
+<b>角色牌</b><br>· 技能1：上场即生效(可能是被动)<br>· 技能2(连携)：需要对应场地在场才能使用<br>· 上角色会替换角色栏旧角色(旧角色进弃牌堆)<br>· 角色首次上场的回合不能攻击，之后每回合可攻击1次<br><br>
+<b>死亡</b><br>· 血量归0：弃掉所有牌、不能再抽牌、不能被回血、回合直接结束<br><br>
+<b>场地效果</b>(每个玩家回合结束时结算)<br>· 厕所：扣2血　· 家：装备失效(优先级最高)<br>· 终焉之地：弃所有手牌并抽回(最多3张)<br>· 寝室：未攻击则回2血　· 教室：本回合伤害不足3则扣1血<br><br>
+<b>判定</b><br>· 卡牌右上角字母 A/B/C 用于部分锦囊的随机判定</div>`;
+  document.getElementById("modal").style.display="flex";
+}
+function showCards(){
+  document.getElementById("m_title").innerHTML="🃏 卡牌大全";
+  let h="";
+  h+="<h3 style='margin:6px 0'>角色牌（连携需对应场地）</h3>";
+  for(const n in ROLES){ const d=ROLES[n]; h+="<div style='margin:6px 0;padding:6px;background:#faf7f0;border-radius:6px'><b>"+n+"</b>（攻"+d.atk+""+(d.field&&d.field!=="特殊"?" ·连携需"+d.field:"")+"）<br><span style='font-size:12px'>"+esc(d.s1)+"</span><br><span style='font-size:12px;color:#b71c1c'>"+esc(d.cb)+"</span></div>"; }
+  h+="<h3 style='margin:10px 0'>场地牌</h3>";
+  for(const n in FIELDS){ h+="<div style='margin:4px 0'><b>"+n+"</b>："+esc(FIELDS[n].desc)+"</div>"; }
+  h+="<h3 style='margin:10px 0'>装备牌</h3>";
+  for(const n in EQUIPS){ h+="<div style='margin:4px 0'><b>"+n+"</b>："+esc(EQUIPS[n].desc)+"</div>"; }
+  h+="<h3 style='margin:10px 0'>锦囊牌</h3>";
+  for(const n in TRICKS){ h+="<div style='margin:4px 0'><b>"+n+"</b>："+esc(TRICKS[n].desc)+"</div>"; }
+  document.getElementById("m_opts").innerHTML=h;
+  document.getElementById("modal").style.display="flex";
+}
 // 兜底：每3秒自动拉取最新状态(实时通道断了也能看到别人的操作)
 setInterval(()=>{ if(state && state.status) refresh(); }, 3000);
 async function doCommit(msg){
@@ -528,7 +560,7 @@ function maxAttack(p){
   if(p.role && p.role.name==="廖宇" && p.canAtkAgain) m=2;
   return m;
 }
-function attackMonster(p){
+function attackMonster(p, healBack){
   if(!state.monster) return;
   if(p.roleJustPlayed){ alert("刚上场的角色本回合不能攻击"); return; }
   // 攻击次数限制同样适用于打怪
@@ -538,7 +570,7 @@ function attackMonster(p){
   state.monster.hp-=dmg;
   p.dmgThisTurn=(p.dmgThisTurn||0)+dmg;
   addLog(p.name+"攻击怪物叶亮，造成"+dmg+"伤害");
-  heal(p,dmg); addLog(p.name+"攻击怪物回复"+dmg+"点血");
+  if(healBack){ heal(p,dmg); addLog("抢零食大会：打出者回复"+dmg+"点血"); }
   if(state.monster.hp<=0){ addLog("怪物叶亮被击败！"); state.monster=null; }
   afterAttackHit(p,null);
   commitNow();
@@ -755,7 +787,7 @@ async function applyTrick(p,card){
     else{
       state.monster={name:"叶亮",hp:5,maxHp:5};
       addLog("怪物叶亮出现(5血)，"+p.name+"立即攻击怪物并回血");
-      attackMonster(p);
+      attackMonster(p,true);
     }
   }else if(n==="寻视"){
     if(isDong){
@@ -815,8 +847,9 @@ function endTurn(){
   if(p.dead){ // 已死亡玩家：直接轮到下家，不弃牌不结算场地
     state.turn=nextPlayerId(p.id); state.turnCount++; advanceTurn(); return;
   }
-  // 回合结束：自选弃牌，直到手牌不超过3张
-  if(p.hand.length>3){
+  // 回合结束：自选弃牌，直到手牌不超过3张(终焉之地场地自己会弃所有手牌并抽回，跳过此步)
+  const zy = fieldOn() && !(p.equip&&p.equip.name==="脸皮") && state.field && state.field.name==="终焉之地";
+  if(!zy && p.hand.length>3){
     const cnt=p.hand.length-3;
     state.discardReq={fromId:p.id, need:[p.id], done:[], count:cnt};
     _afterDiscard=finishEndTurn;
@@ -836,10 +869,11 @@ function finishEndTurn(){
     const f=state.field.name;
     if(f==="厕所"){ damage(p,2); addLog("厕所："+p.name+"扣2血"); }
     else if(f==="终焉之地"){
-      const cnt=Math.min(3,p.hand.length);
-      for(let i=0;i<cnt;i++) discardHandAt(p,0);
+      const total=p.hand.length;
+      const cnt=Math.min(3,total);
+      for(let i=0;i<total;i++) discardHandAt(p,0);
       draw(p,cnt);
-      addLog("终焉之地："+p.name+"弃"+cnt+"张并抽"+cnt+"张");
+      addLog("终焉之地："+p.name+"弃掉全部"+total+"张手牌并抽回"+cnt+"张");
     }
     else if(f==="寝室" && !p.hasAttacked){ heal(p,2); addLog("寝室："+p.name+"未攻击回2血"); }
     else if(f==="教室" && (p.dmgThisTurn||0)<3){ damage(p,1); addLog("教室："+p.name+"本回合伤害不足3，扣1血"); }
@@ -1016,11 +1050,16 @@ function handHtml(p,isMe){
   return p.hand.map((c,i)=>{
     const t=cardType(c);
     const d=ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{};
-    const info=t==="role"?("攻"+d.atk+(d.field&&d.field!=="特殊"?" ·连携需"+d.field:"")):d.desc||"";
+    let info="";
+    if(t==="role"){
+      info="<b>攻"+d.atk+"</b>"+(d.field&&d.field!=="特殊"?" ·连携需"+d.field:"");
+      if(d.s1) info+="<br><span style='font-size:10px'>"+esc(d.s1)+"</span>";
+      if(d.cb) info+="<br><span style='font-size:10px;color:#b71c1c'>"+esc(d.cb)+"</span>";
+    } else info=d.desc||"";
     const sel=(i===selIdx)?"sel":"";
     return `<div class="card ${t} ${sel}" onclick="selectCard(${i})">
       <span class="letter">${c.letter}</span>
-      <b>${esc(c.name)}</b><br><span class="tip">${esc(info)}</span></div>`;
+      <b>${esc(c.name)}</b><br><span class="tip">${info}</span></div>`;
   }).join("");
 }
 function selectCard(i){ selIdx=(selIdx===i?-1:i); render(); }
