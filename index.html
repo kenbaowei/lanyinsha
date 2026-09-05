@@ -49,7 +49,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.0</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.1</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -164,6 +164,7 @@ function buildDeckNames(){
 /* ============ Supabase 连接与状态 ============ */
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let room="lanyin1", meId="", meName="", state=null, sub=null, selIdx=-1;
+let _aiRunning=false, _aiAuto=false, _winPlayed=false; // 人机/胜利音效标记
 
 let _busy=false; // 正在弹窗选择目标时，暂停自动刷新，避免操作被覆盖
 async function refresh(){ 
@@ -177,6 +178,10 @@ async function refresh(){
 /* 页面内选择弹层（替代 prompt，手机也能用） */
 let _askRes=null, _askOpts=[];
 function ask(title, opts, withText){
+  if(_aiAuto){ // 人机回合：自动选第一个选项
+    _busy=false;
+    return Promise.resolve((opts&&opts.length)?opts[0].value:"");
+  }
   _busy=true;
   return new Promise(res=>{
     _askRes=res; _askOpts=opts||[];
@@ -365,6 +370,16 @@ function onDeath(p){
   if(!p || p.dead) return;
   markDead(p);
   addLog(p.name+"血量归0，死亡出局！手牌/角色/装备全部进入弃牌堆");
+  // 胜负判定：只剩1名(或0名)存活玩家时结束
+  if(state && !state.winner){
+    const alive=Object.keys(state.players).filter(id=>!state.players[id].dead);
+    if(alive.length<=1){
+      const w=state.players[alive[0]];
+      state.winner={id:alive[0]||"", name:w?w.name:"无人"};
+      state.status="over";
+      addLog("🏆 游戏结束！"+(w?w.name:"无人")+" 是兰荫王！");
+    }
+  }
   // 若死的是当前回合玩家，直接结束他的回合
   if(state && state.turn===p.id){ setTimeout(()=>{ if(state && currentTurnPlayer() && currentTurnPlayer().dead) endTurn(); },0); }
 }
@@ -813,6 +828,163 @@ async function applyTrick(p,card){
   commitNow();
 }
 
+/* ============ 人机系统 ============ */
+function addAI(){
+  if(!state || meId!==state.hostId){ alert("只有房主可以添加人机"); return; }
+  const n=Object.keys(state.players).filter(id=>state.players[id].ai).length+1;
+  const id="ai"+Date.now();
+  const ai={id, name:"人机"+n, hp:10, hand:[], role:null, equip:null, dead:false, ai:true,
+    hasAttacked:false, attackCount:0, dmgThisTurn:0, roleJustPlayed:false};
+  state.players[id]=ai; state.order.push(id);
+  if(state.status==="playing") draw(ai,4);
+  addLog("房主添加了"+ai.name);
+  commitNow();
+}
+async function aiTurn(){
+  _aiAuto=true;
+  try{
+    await new Promise(r=>setTimeout(r,900));
+    if(!state || state.status!=="playing") return;
+    const ai=state.players[state.turn];
+    if(!ai || !ai.ai || ai.dead) return;
+    // 1. 上角色(选攻击力最高的)
+    if(!ai.role){
+      const rl=ai.hand.map((c,i)=>({c,i})).filter(x=>cardType(x.c)==="role");
+      if(rl.length){
+        rl.sort((a,b)=>(ROLES[b.c.name].atk||0)-(ROLES[a.c.name].atk||0));
+        const card=ai.hand.splice(rl[0].i,1)[0];
+        await onPlayRole(ai,card);
+        commitNow();
+        await new Promise(r=>setTimeout(r,700));
+        if(!state || state.turn!==ai.id || !state.players[ai.id]) return;
+      }
+    }
+    // 2. 装备(脸皮太复杂，AI跳过)
+    if(!ai.equip){
+      const eq=ai.hand.map((c,i)=>({c,i})).filter(x=>cardType(x.c)==="equip" && x.c.name!=="脸皮");
+      if(eq.length){
+        const card=ai.hand.splice(eq[0].i,1)[0];
+        if(ai.equip) state.discardPile.push(ai.equip);
+        ai.equip=card;
+        addLog(ai.name+"装备了【"+card.name+"】");
+        commitNow();
+        await new Promise(r=>setTimeout(r,500));
+        if(!state || state.turn!==ai.id) return;
+      }
+    }
+    // 3. 场地
+    if(!state.field){
+      const fs=ai.hand.map((c,i)=>({c,i})).filter(x=>cardType(x.c)==="field");
+      if(fs.length){
+        const card=ai.hand.splice(fs[0].i,1)[0];
+        if(state.field) state.discardPile.push(state.field);
+        state.field=card;
+        addLog(ai.name+"打出了场地【"+card.name+"】");
+        commitNow();
+        await new Promise(r=>setTimeout(r,500));
+        if(!state || state.turn!==ai.id) return;
+      }
+    }
+    // 4. 攻击(随机选一个存活玩家)
+    if(ai.role && !ai.roleJustPlayed && ai.attackCount<maxAttack(ai) && !state.pending){
+      const ids=Object.keys(state.players).filter(id=>id!==ai.id && !state.players[id].dead);
+      if(ids.length){
+        const t=state.players[ids[Math.floor(Math.random()*ids.length)]];
+        let dmg=calcAtk(ai,t);
+        state.pending={type:"attack", from:ai.id, to:t.id, dmg, atkName:ai.role.name};
+        ai.attackCount=(ai.attackCount||0)+1;
+        addLog(ai.name+"攻击"+t.name+"，伤害"+dmg+"，等待对方响应…");
+        commitNow();
+        await new Promise(r=>setTimeout(r,800));
+        if(!state || state.turn!==ai.id) return;
+      }
+    }
+    // 5. 结束回合
+    if(state && state.turn===ai.id && !state.pending){ endTurn(); }
+  }catch(e){ addLog("人机回合异常："+(e&&e.message?e.message:e)); }
+  finally{ _aiAuto=false; }
+}
+function aiRespond(){
+  if(!state || state.status!=="playing") return;
+  // 人机被攻击：有闪打闪，否则承受
+  if(state.pending && state.pending.type==="attack"){
+    const t=state.players[state.pending.to];
+    if(t && t.ai && !t.dead){
+      const i=t.hand.findIndex(c=>c.name==="闪");
+      if(i>=0){ // 人机自己打闪(不走respondFlash，因为那是给真人用的)
+        state.discardPile.push(t.hand.splice(i,1)[0]);
+        state.pending=null;
+        addLog(t.name+"打出【闪】，闪避了攻击");
+        commitNow();
+      } else {
+        respondTake();
+      }
+    }
+    return;
+  }
+  // 人机需要弃牌(回合结束自选/朱雍森等)
+  const dr=state.discardReq;
+  if(dr){
+    for(const id of dr.need){
+      const q=state.players[id];
+      if(q && q.ai && dr.done.indexOf(id)<0){
+        aiDiscard(id);
+        return;
+      }
+    }
+  }
+}
+function aiDiscard(id){
+  const dr=state.discardReq; if(!dr) return;
+  const q=state.players[id];
+  if(dr.need.indexOf(id)<0 || dr.done.indexOf(id)>=0 || !q.hand.length) return;
+  discardHandAt(q, Math.floor(Math.random()*q.hand.length));
+  addLog(q.name+"弃了1张牌");
+  if(dr.count){
+    dr.count--;
+    if(dr.count<=0){
+      state.discardReq=null;
+      const cb=_afterDiscard; _afterDiscard=null;
+      if(cb){ cb(); return; }
+    }
+  }else{
+    dr.done.push(id);
+    if(dr.done.length>=dr.need.length){ state.discardReq=null; addLog("弃牌完成"); }
+  }
+  commitNow();
+}
+function aiTick(){
+  if(!state || state.status!=="playing" || meId!==state.hostId) return; // 只有房主驱动人机
+  if(_aiRunning) return;
+  try{ aiRespond(); }catch(e){}
+  const cur=currentTurnPlayer();
+  if(cur && cur.ai && !cur.dead && !_aiRunning){
+    _aiRunning=true;
+    aiTurn().then(()=>{ _aiRunning=false; }).catch(()=>{ _aiRunning=false; });
+  }
+}
+setInterval(aiTick, 900);
+
+/* ============ 胜利音效(WebAudio合成，无需外部文件) ============ */
+function playWinSound(){
+  if(_winPlayed) return; _winPlayed=true;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) return;
+    const ac=new AC();
+    [523,659,784,1047,784,1047].forEach((f,i)=>{
+      const o=ac.createOscillator(), g=ac.createGain();
+      o.type="triangle"; o.frequency.value=f;
+      o.connect(g); g.connect(ac.destination);
+      const t=ac.currentTime+i*0.18;
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(0.3,t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+0.16);
+      o.start(t); o.stop(t+0.18);
+    });
+  }catch(e){}
+}
+
 /* ============ 回合流程 ============ */
 let turnDepth=0;
 function turnBegin(p){
@@ -949,8 +1121,8 @@ function respondTrickVeto(){ // 其他玩家反制
 function esc(s){ return (s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function render(){
   if(!state) return;
-  // ── 等待房主开始阶段 ──
-  if(state.status!=="playing"){
+  // ── 等待房主开始阶段(游戏结束则走正常渲染显示胜利) ──
+  if(state.status!=="playing" && state.status!=="over"){
     const ph=document.getElementById("players");
     let h="";
     state.order.forEach(pid=>{
@@ -966,7 +1138,9 @@ function render(){
     tb.innerHTML="<b>房间：</b>"+esc(room)+" ｜ 已加入 "+state.order.length+" 人 ｜ 状态：等待房主开始";
     document.getElementById("opbtns").innerHTML=
       (meId===state.hostId)
-        ? `<button class="btn green" onclick="startGame()">开始游戏（当前 ${state.order.length} 人）</button><span class="tip">你是房主，等人到齐后点这里开打</span>`
+        ? `<button class="btn green" onclick="startGame()">开始游戏（当前 ${state.order.length} 人）</button>
+           <button class="btn blue" onclick="addAI()">🤖添加人机</button>
+           <span class="tip">你是房主，可添加人机凑人数，或等人到齐后点开始</span>`
         : `<span class="tip">已加入房间，等房主点“开始游戏”…</span>`;
     document.getElementById("selinfo").innerHTML="";
     document.getElementById("pending").style.display="none";
@@ -1044,6 +1218,19 @@ function render(){
   // 日志
   document.getElementById("log").innerHTML=state.log.slice(-40).map(x=>`<div>${esc(x)}</div>`).join("");
   document.getElementById("log").scrollTop=1e9;
+  // 胜利弹窗(所有玩家都能看到)
+  if(state.winner && !document.getElementById("winoverlay")){
+    const ov=document.createElement("div");
+    ov.id="winoverlay";
+    ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:100;display:flex;align-items:center;justify-content:center";
+    ov.innerHTML=`<div style="background:#fffbe9;border-radius:16px;padding:28px 36px;text-align:center;max-width:320px;border:3px solid #c9a227">
+      <div style="font-size:44px">👑</div>
+      <div style="font-size:22px;font-weight:bold;margin:12px 0">${esc(state.winner.name)} 是兰荫王！</div>
+      <div style="font-size:13px;color:#777;margin-bottom:8px">游戏结束</div>
+      <button class="btn green" onclick="document.getElementById('winoverlay').remove()">关闭</button></div>`;
+    document.body.appendChild(ov);
+    playWinSound();
+  }
 }
 function handHtml(p,isMe){
   if(!isMe){ return `<div class="card back">${p.hand.length} 张</div>`; }
@@ -1065,7 +1252,7 @@ function handHtml(p,isMe){
 function selectCard(i){ selIdx=(selIdx===i?-1:i); render(); }
 function renderOp(mep){
   const b=document.getElementById("opbtns");
-  if(!mep || mep.dead){ b.innerHTML=""; return; }
+  if(!mep || mep.dead || state.winner){ b.innerHTML=""; return; }
   const mine=state.turn===meId;
   const pending=!!state.pending;
   const sel=mep.hand[selIdx];
@@ -1079,6 +1266,9 @@ function renderOp(mep){
     h+=`<button class="btn green" onclick="endTurn()" ${pending?"disabled":""}>结束回合</button>`;
   } else {
     h+=`<span class="tip">轮到 ${esc(currentTurnPlayer()?currentTurnPlayer().name:"")} 行动。你是防守方：被攻击时可打闪，别人出锦囊时可反制。</span>`;
+  }
+  if(meId===state.hostId){
+    h+=`<div style="margin-top:6px"><button class="btn blue" style="font-size:12px" onclick="addAI()">🤖添加人机</button><span class="tip" style="margin-left:6px">房主随时可添加</span></div>`;
   }
   b.innerHTML=h;
   document.getElementById("selinfo").innerHTML=info;
@@ -1124,6 +1314,7 @@ async function startGame(){
   if(state.order.length<1){ alert("至少需要1名玩家"); return; }
   state.status="playing";
   state.turn=state.order[0];
+  _winPlayed=false; // 新一局重置胜利音效
   addLog("游戏开始！每人发4张手牌");
   for(const id in state.players){
     draw(state.players[id],4);
