@@ -24,6 +24,8 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 .ply{background:#fff;border:1px solid #d8c9b0;border-radius:10px;padding:10px;flex:1;min-width:260px}
 .ply.me{border:2px solid #c62828}
 .ply .nm{font-weight:bold;font-size:15px}
+.ply .avatar{display:inline-block;width:32px;height:32px;border-radius:50%;background:#f0e6d2;text-align:center;line-height:32px;font-size:18px;margin-right:6px;vertical-align:middle}
+.ply .avatarimg{width:32px;height:32px;border-radius:50%;object-fit:cover;vertical-align:middle}
 .ply .hpwrap{height:14px;background:#eee;border-radius:7px;margin:4px 0;overflow:hidden}
 .ply .hpbar{height:100%;background:linear-gradient(90deg,#43a047,#66bb6a);transition:width .3s}
 .slot{display:inline-block;border:1px dashed #bbb;border-radius:8px;padding:4px 8px;margin:3px;font-size:13px;min-width:80px;text-align:center;background:#faf7f2}
@@ -49,7 +51,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.2</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.3</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showMusic()">🎵音乐</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -244,10 +246,19 @@ function showCards(){
 const SONGS = [
   {name:"宇宙冷漠", src:"music/37977394824-1-30280.mp3"},
   {name:"绝不认输", src:"music/55388592-1-30280.mp3"},
-   {name:"雨爱", src:"music/雨爱.mp3"},
+ {name:"雨爱", src:"music/雨爱.mp3"},
+
   // 在这里继续加...
 ];
 let _curSong=-1, _musicPlaying=false;
+/* ===== 个性化配置（改这里就行） ===== */
+const DEAD_AVATAR = "dead.png";
+const LOW_HP_SONG = "雨爱";
+let _lowHpPlayed = {};
+function playSongByName(name){
+  const i=SONGS.findIndex(s=>s.name===name);
+  if(i>=0) playSong(i);
+}
 function showMusic(){
   document.getElementById("m_title").innerHTML="🎵 音乐播放器";
   const curName = _curSong>=0 ? SONGS[_curSong].name : "未播放";
@@ -1067,9 +1078,8 @@ function endTurn(){
   if(p.dead){ // 已死亡玩家：直接轮到下家，不弃牌不结算场地
     state.turn=nextPlayerId(p.id); state.turnCount++; advanceTurn(); return;
   }
-  // 回合结束：自选弃牌，直到手牌不超过3张(终焉之地场地自己会弃所有手牌并抽回，跳过此步)
-  const zy = fieldOn() && !(p.equip&&p.equip.name==="脸皮") && state.field && state.field.name==="终焉之地";
-  if(!zy && p.hand.length>3){
+  // 回合结束：手牌>3先自选弃到3张（终焉之地也一样，弃完再执行终焉之地换牌）
+  if(p.hand.length>3){
     const cnt=p.hand.length-3;
     state.discardReq={fromId:p.id, need:[p.id], done:[], count:cnt};
     _afterDiscard=finishEndTurn;
@@ -1210,7 +1220,7 @@ function render(){
     const r=p.role?p.role.name:"—";
     const e=p.equip?p.equip.name:"—";
     html+=`<div class="ply ${isMe?"me":""}">
-      <div class="nm">${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}${p.dead?" ☠已死亡":""}</div>
+      <div class="nm"><span class="avatar">${p.dead?`<img src="${DEAD_AVATAR}" class="avatarimg" alt="dead">`:"🙂"}</span>${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}${p.dead?" ☠已死亡":""}</div>
       <div class="hpwrap"><div class="hpbar" style="width:${p.hp*10}%"></div></div>
       <div style="font-size:13px">HP <b>${p.hp}</b>/10${p.dead?'<span style="color:#c62828">（出局）</span>':""}</div>
       <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+roleAtk(p)+")"):""}</span>
@@ -1220,6 +1230,11 @@ function render(){
     </div>`;
   });
   ph.innerHTML=html;
+  // 一滴血检测：任意玩家血量变为1时播放雨爱（每个端本地触发）
+  Object.values(state.players).forEach(p=>{
+    if(p.hp===1 && !p.dead){ if(!_lowHpPlayed[p.id]){ _lowHpPlayed[p.id]=true; playSongByName(LOW_HP_SONG); } }
+    else { _lowHpPlayed[p.id]=false; }
+  });
   // 中央：场地/怪物/牌堆
   const c=document.getElementById("center");
   let ch=`<div class="slot" style="min-width:150px">场地：<b>${state.field?esc(state.field.name):"—"}</b><br><span class="tip">${state.field?esc(FIELDS[state.field.name].desc):""}</span>${state.fieldCooldown>0?"<br><span style='color:#c62828'>已失效"+state.fieldCooldown+"回合</span>":""}</div>`;
