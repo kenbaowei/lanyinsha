@@ -51,7 +51,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.3</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.4</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showMusic()">🎵音乐</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -247,13 +247,15 @@ const SONGS = [
   {name:"宇宙冷漠", src:"music/37977394824-1-30280.mp3"},
   {name:"绝不认输", src:"music/55388592-1-30280.mp3"},
  {name:"雨爱", src:"music/雨爱.mp3"},
-
+{name:"瞬（沈毅款）", src:"music/瞬（沈毅款）.mp3"},
+ {name:"瞬", src:"music/瞬.mp3"},
   // 在这里继续加...
 ];
 let _curSong=-1, _musicPlaying=false;
 /* ===== 个性化配置（改这里就行） ===== */
 const DEAD_AVATAR = "dead.png";
 const LOW_HP_SONG = "雨爱";
+const ROLE_ENTER_SONG = {"沈毅":"瞬（沈毅款）"};
 let _lowHpPlayed = {};
 function playSongByName(name){
   const i=SONGS.findIndex(s=>s.name===name);
@@ -528,6 +530,8 @@ async function onPlayRole(p, card){
     const c=findInDiscard("手机");
     if(c){ p.hand.push(c); addLog(p.name+"从弃牌堆拿回一张手机"); }
   }
+  // ---- 角色上场音乐 ----
+  if(ROLE_ENTER_SONG[card.name]) playSongByName(ROLE_ENTER_SONG[card.name]);
 }
 
 /* ============ 打出/装备/场地牌 ============ */
