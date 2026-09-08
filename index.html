@@ -51,7 +51,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v3.0</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v3.1</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showMusic()">🎵音乐</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -183,10 +183,15 @@ function cardInfo(c){ const d = ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||F
 function cardType(c){ const d=cardInfo(c); return d.type||"trick"; }
 
 /* ============ 牌库构建(自选场地组+捆绑牌+随机补齐到51张) ============ */
-function buildDeckNames(selectedGroups){
-  if(!selectedGroups || !selectedGroups.length) selectedGroups = Object.keys(FIELD_GROUPS);
-  // 最多6组
+// 普通锦囊/装备列表（非捆绑非专属）
+function getNormalTricks(){ return Object.keys(TRICKS).filter(n=>n!=="闪"&&n!=="春日影"&&n!=="前所未有之大变局"&&n!=="石头"&&["权威","文艺汇演","抢零食大会","寻视","发怒"].indexOf(n)<0); }
+function getNormalEquips(){ return Object.keys(EQUIPS).filter(n=>n!=="乐器"&&["权威"].indexOf(n)<0); }
+function buildDeckNames(selectedGroups, trickCounts, equipCounts){
+  if(!selectedGroups || !selectedGroups.length) selectedGroups = Object.keys(FIELD_GROUPS).slice(0,6);
   if(selectedGroups.length>6) selectedGroups=selectedGroups.slice(0,6);
+  // 默认数量：每种1张
+  if(!trickCounts){ trickCounts={}; getNormalTricks().forEach(n=>trickCounts[n]=1); }
+  if(!equipCounts){ equipCounts={}; getNormalEquips().forEach(n=>equipCounts[n]=1); }
   let d=[];
   const usedRoles=new Set(), usedTricks=new Set();
   const bundled=["春日影","前所未有之大变局","石头"];
@@ -201,14 +206,18 @@ function buildDeckNames(selectedGroups){
     grp.tricks.forEach(t=>{ if(!usedTricks.has(t)){ d.push(t); usedTricks.add(t); } });
     grp.equips.forEach(e=>{ d.push(e); });
   });
-  // 普通锦囊/装备池（排除专属、捆绑、石头）
-  const normalTricks=Object.keys(TRICKS).filter(n=>n!=="闪"&&bundled.indexOf(n)<0&&dongEx.indexOf(n)<0&&!usedTricks.has(n));
-  const normalEquips=Object.keys(EQUIPS).filter(n=>dongEx.indexOf(n)<0&&n!=="乐器");
-  // 先每种普通牌加1张
-  normalTricks.forEach(n=>d.push(n));
-  normalEquips.forEach(n=>d.push(n));
+  // 按自定义数量加入普通锦囊
+  getNormalTricks().forEach(n=>{
+    const cnt=Math.max(0,parseInt(trickCounts[n])||0);
+    for(let i=0;i<cnt;i++) d.push(n);
+  });
+  // 按自定义数量加入普通装备
+  getNormalEquips().forEach(n=>{
+    const cnt=Math.max(0,parseInt(equipCounts[n])||0);
+    for(let i=0;i<cnt;i++) d.push(n);
+  });
   // 如果超过51，随机删除普通牌（保留至少1张普通锦囊和1张普通装备）
-  const pool=[...normalTricks,...normalEquips];
+  const pool=[...getNormalTricks(),...getNormalEquips()];
   while(d.length>51 && pool.length>2){
     const idx=Math.floor(Math.random()*pool.length);
     const name=pool.splice(idx,1)[0];
@@ -216,7 +225,7 @@ function buildDeckNames(selectedGroups){
     if(di>=0) d.splice(di,1);
   }
   // 如果不足51，随机重复普通牌补到51
-  const fill=[...normalTricks,...normalEquips,"闪"];
+  const fill=[...getNormalTricks(),...getNormalEquips(),"闪"];
   while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]);
   return shuffle(d);
 }
@@ -375,12 +384,16 @@ async function pushState(){ // 新增房间用
 
 /* ============ 新游戏 ============ */
 function newGame(){
-  const selGroups=Object.keys(FIELD_GROUPS); // 默认全选
-  const names=buildDeckNames(selGroups);
+  const selGroups=Object.keys(FIELD_GROUPS).slice(0,6);
+  const defTricks={}, defEquips={};
+  getNormalTricks().forEach(n=>defTricks[n]=1);
+  getNormalEquips().forEach(n=>defEquips[n]=1);
+  const names=buildDeckNames(selGroups,defTricks,defEquips);
   return {
     v:1, room, players:{}, order:[], turn:null, turnCount:0,
     status:"waiting", hostId:null, selectedGroups:selGroups,
     field:null, fieldCooldown:0, drawPile:names.map(makeCard), discardPile:[],
+    selectedGroups:selGroups, deckTrickCounts:defTricks, deckEquipCounts:defEquips,
     monster:null, pending:null, log:["房间已创建，等待房主开始游戏"]
   };
 }
@@ -852,6 +865,71 @@ async function skill1Action(){
     }
   }else if(n==="懂东方"){
     alert("懂东方的技能是【所有锦囊都可当作校长出面使用】。在别人打出锦囊时，点击\"锦囊反制\"即可(无需手中有校长出面)。");
+  }else if(n==="丰川祥子"){
+    if(p.xiangziSwitchLock){ alert("刚上场或刚切换形态，本回合不能切换"); return; }
+    p.xiangziBlack=!p.xiangziBlack;
+    p.xiangziSwitchLock=true;
+    p.roleJustPlayed=true;
+    addLog(p.name+"切换为"+(p.xiangziBlack?"黑祥(攻1,可攻击两次)":"白祥(攻3)")+"，本回合无法攻击");
+  }else if(n==="三角初华"){
+    const ids3=Object.keys(state.players).filter(id=>id!==meId && !state.players[id].dead);
+    const t3=await ask("三角初华：选择目标，使其下回合不能切换角色", ids3.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k3=parseInt(t3||"0")-1;
+    if(ids3[k3]){
+      const q=state.players[ids3[k3]];
+      if(q.role && q.role.name==="若叶睦"){ markDead(q); addLog("三角初华对若叶睦使用，若叶睦直接死亡！"); }
+      else if(q.role && q.role.name==="丰川祥子"){ markDead(p); addLog("三角初华对丰川祥子使用，三角初华自己死亡！"); }
+      else{ q.noSwitchNext=true; addLog(q.name+"下回合不能切换角色"); }
+    }
+  }else if(n==="高松灯"){
+    const ids4=Object.keys(state.players).filter(id=>!state.players[id].dead);
+    const t4=await ask("高松灯：选择目标，给其手牌加入一张不可弃的[石头]", ids4.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k4=parseInt(t4||"0")-1;
+    if(ids4[k4]){
+      const q=state.players[ids4[k4]];
+      q.hand.push({name:"石头", letter:"ABC"[Math.floor(Math.random()*3)], id:uid(), unthrowable:true});
+      addLog(p.name+"给"+q.name+"加入了一张不可弃的[石头]");
+    }
+  }else if(n==="千早爱音"){
+    if(p.aineForm && p.aineForm!=="千早爱音"){ alert("已变为"+p.aineForm+"，不能再用此技能"); return; }
+    damage(p,1);
+    p.aineForm="唐爱音";
+    p.role.atk=4;
+    addLog(p.name+"扣1血，变为唐爱音，攻击力变为4");
+  }else if(n==="长崎素世"){
+    const ids5=Object.keys(state.players).filter(id=>!state.players[id].dead);
+    const t5=await ask("长崎素世：选择目标回复1血，但其下回合不能攻击你", ids5.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k5=parseInt(t5||"0")-1;
+    if(ids5[k5]){
+      const q=state.players[ids5[k5]];
+      heal(q,1);
+      q.cannotAttackPlayer=p.id;
+      q.cannotAttackTurn=state.turnCount+1;
+      addLog(p.name+"给"+q.name+"回1血，"+q.name+"下回合不能攻击"+p.name);
+    }
+  }else if(n==="椎名立希"){
+    const ids6=Object.keys(state.players).filter(id=>id!==meId && state.players[id].role && !state.players[id].dead);
+    if(!ids6.length){ alert("没有有角色的目标"); return; }
+    const t6=await ask("椎名立希：选择目标，判定为C则其角色下场", ids6.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"("+state.players[id].role.name+")",value:String(i+1)})));
+    const k6=parseInt(t6||"0")-1;
+    if(ids6[k6]){
+      const q=state.players[ids6[k6]];
+      if(p.ritsukiCombo){
+        if(q.role){ state.discardPile.push(q.role); q.role=null; addLog("椎名立希连携：无需判定，"+q.name+"的角色直接下场"); }
+      } else {
+        const L=judge(p.id);
+        if(L==="C"){ if(q.role){ state.discardPile.push(q.role); q.role=null; addLog("椎名立希判定C，"+q.name+"的角色下场"); } }
+        else addLog("椎名立希判定"+L+"，无效果");
+      }
+    }
+  }else if(n==="要乐奈"){
+    alert("要乐奈的技能是被动：攻击后目标下回合开始时扣1血，无需主动使用。");
+  }else if(n==="佑天寺若麦"){
+    alert("佑天寺若麦的技能是回合开始时自动判定，无需主动使用。");
+  }else if(n==="若叶睦"){
+    alert("若叶睦的技能是被动：血量>5为墨提斯(攻3)，≤5为若叶睦(攻1)，无需主动使用。连携需主动使用。");
+  }else if(n==="八幡海玲"){
+    alert("八幡海玲的技能是被动：花1血上场，攻击后立即下场，无需主动使用。");
   }else{
     alert("【"+n+"】的技能1："+(ROLES[n]?ROLES[n].s1:"")+"\n该技能为上场/被动效果，无需主动使用。");
   }
@@ -1146,27 +1224,41 @@ function addAI(){
   commitNow();
 }
 /* ============ 自选牌库编辑器 ============ */
-let _deckSel=[]; // 临时选择
+let _deckSel=[], _deckTricks={}, _deckEquips={};
 function showDeckBuilder(){
   if(!state || meId!==state.hostId){ alert("只有房主可以编辑牌库"); return; }
-  _deckSel=[...(state.selectedGroups||Object.keys(FIELD_GROUPS))];
+  _deckSel=[...(state.selectedGroups||Object.keys(FIELD_GROUPS).slice(0,6))];
+  _deckTricks=state.deckTrickCounts?JSON.parse(JSON.stringify(state.deckTrickCounts)):{};
+  _deckEquips=state.deckEquipCounts?JSON.parse(JSON.stringify(state.deckEquipCounts)):{};
+  getNormalTricks().forEach(n=>{ if(_deckTricks[n]===undefined) _deckTricks[n]=1; });
+  getNormalEquips().forEach(n=>{ if(_deckEquips[n]===undefined) _deckEquips[n]=1; });
   renderDeckBuilder();
 }
 function renderDeckBuilder(){
   document.getElementById("m_title").innerHTML="🃏 编辑牌库（最多6组，MyGO!!!!!与Ave Mujica必须同选）";
-  let h=`<div style="font-size:12px;color:#777;margin-bottom:8px">勾选要加入的场地组，相关角色和捆绑牌会自动加入。最终牌库固定51张。</div>`;
+  let h=`<div style="font-size:12px;color:#777;margin-bottom:8px">勾选场地组，设置锦囊/装备数量（0=不加入）。最终牌库固定51张。</div>`;
+  h+=`<div style="font-weight:bold;margin:6px 0">场地组（${_deckSel.length}/6）</div>`;
   Object.keys(FIELD_GROUPS).forEach(g=>{
     const grp=FIELD_GROUPS[g];
     const checked=_deckSel.indexOf(g)>=0?"checked":"";
     const fieldName=grp.field?grp.field:"(无场地)";
-    h+=`<label style="display:block;padding:6px;margin:3px 0;background:#f5f5f5;border-radius:6px;cursor:pointer">
-      <input type="checkbox" ${checked} onchange="toggleDeckGroup('${g}')" style="margin-right:6px">
-      <b>${g}</b> <span style="font-size:11px;color:#888">[${fieldName}] ${grp.roles.length}角色${grp.tricks.length?" +"+grp.tricks.length+"锦囊":""}${grp.equips.length?" +"+grp.equips.length+"装备":""}</span>
+    h+=`<label style="display:block;padding:4px;margin:2px 0;background:#f5f5f5;border-radius:6px;cursor:pointer;font-size:13px">
+      <input type="checkbox" ${checked} onchange="toggleDeckGroup('${g}')" style="margin-right:4px">
+      <b>${g}</b> <span style="font-size:11px;color:#888">[${fieldName}] ${grp.roles.length}角色</span>
     </label>`;
   });
-  const cnt=_deckSel.length;
-  const names=buildDeckNames(_deckSel);
-  h+=`<div style="margin-top:10px;font-size:13px"><b>已选 ${cnt}/6 组</b> ｜ 牌库 ${names.length} 张</div>`;
+  h+=`<div style="font-weight:bold;margin:8px 0 4px">锦囊牌数量</div><div style="display:flex;flex-wrap:wrap;gap:4px">`;
+  getNormalTricks().forEach(n=>{
+    h+=`<span style="font-size:12px;background:#f0f0f0;padding:3px 6px;border-radius:4px">${esc(n)} <input type="number" min="0" max="5" value="${_deckTricks[n]}" style="width:36px" onchange="_deckTricks['${n}']=parseInt(this.value)||0;renderDeckBuilder()"></span>`;
+  });
+  h+=`</div>`;
+  h+=`<div style="font-weight:bold;margin:8px 0 4px">装备牌数量</div><div style="display:flex;flex-wrap:wrap;gap:4px">`;
+  getNormalEquips().forEach(n=>{
+    h+=`<span style="font-size:12px;background:#f0f0f0;padding:3px 6px;border-radius:4px">${esc(n)} <input type="number" min="0" max="5" value="${_deckEquips[n]}" style="width:36px" onchange="_deckEquips['${n}']=parseInt(this.value)||0;renderDeckBuilder()"></span>`;
+  });
+  h+=`</div>`;
+  const names=buildDeckNames(_deckSel,_deckTricks,_deckEquips);
+  h+=`<div style="margin-top:10px;font-size:13px"><b>牌库预览：${names.length} 张</b></div>`;
   h+=`<div style="display:flex;gap:8px;margin-top:10px">
     <button class="btn green" onclick="confirmDeckBuilder()" style="flex:1">确认</button>
     <button class="btn gray" onclick="modalCancel()" style="flex:1">取消</button>
@@ -1178,7 +1270,6 @@ function toggleDeckGroup(g){
   const i=_deckSel.indexOf(g);
   if(i>=0){
     _deckSel.splice(i,1);
-    // 取消Ave Mujica或MyGO!!!!!时，另一个也取消
     if(LINKED_GROUPS.indexOf(g)>=0){
       const other=LINKED_GROUPS.find(x=>x!==g);
       const j=_deckSel.indexOf(other);
@@ -1187,7 +1278,6 @@ function toggleDeckGroup(g){
   } else {
     if(_deckSel.length>=6){ alert("最多选6组"); return; }
     _deckSel.push(g);
-    // 选Ave Mujica或MyGO!!!!!时，另一个也选
     if(LINKED_GROUPS.indexOf(g)>=0){
       const other=LINKED_GROUPS.find(x=>x!==g);
       if(_deckSel.indexOf(other)<0) _deckSel.push(other);
@@ -1197,10 +1287,10 @@ function toggleDeckGroup(g){
 }
 function confirmDeckBuilder(){
   if(_deckSel.length<1){ alert("至少选1组"); return; }
-  if(_deckSel.length>6){ alert("最多6组"); return; }
   state.selectedGroups=[..._deckSel];
-  // 重建牌库
-  const names=buildDeckNames(state.selectedGroups);
+  state.deckTrickCounts=JSON.parse(JSON.stringify(_deckTricks));
+  state.deckEquipCounts=JSON.parse(JSON.stringify(_deckEquips));
+  const names=buildDeckNames(state.selectedGroups,state.deckTrickCounts,state.deckEquipCounts);
   state.drawPile=names.map(makeCard);
   state.discardPile=[];
   addLog("房主修改了牌库："+_deckSel.join("、")+"（共"+names.length+"张）");
@@ -1532,7 +1622,7 @@ function render(){
       <div class="nm"><span class="avatar">${p.dead?`<img src="${DEAD_AVATAR}" class="avatarimg" alt="dead">`:"🙂"}</span>${esc(p.name)}${isMe?" (你)":""}${state.turn===pid?" 👑":""}${p.dead?" ☠已死亡":""}</div>
       <div class="hpwrap"><div class="hpbar" style="width:${p.hp*10}%"></div></div>
       <div style="font-size:13px">HP <b>${p.hp}</b>/10${p.dead?'<span style="color:#c62828">（出局）</span>':""}</div>
-      <div><span class="slot">角色：<b>${esc(r)}</b>${p.role?("(攻"+roleAtk(p)+")"):""}</span>
+      <div><span class="slot">角色：<b>${esc(r)}${p.role&&p.role.name==="丰川祥子"?"("+(p.xiangziBlack?"黑祥":"白祥")+")":""}${p.role&&p.role.name==="若叶睦"?"("+(p.hp>5?"墨提斯":"若叶睦")+")":""}${p.role&&p.role.name==="千早爱音"&&p.aineForm?"("+p.aineForm+")":""}</b>${p.role?("(攻"+roleAtk(p)+")"):""}</span>
            <span class="slot">装备：<b>${esc(e)}</b>${p.equip?`<br><span class="tip">${esc((EQUIPS[p.equip.name]||{}).desc||"")}</span>`:""}</span></div>
       <div style="font-size:12px;color:#777">${p.role?(ROLES[p.role.name]?((ROLES[p.role.name].field&&ROLES[p.role.name].field!=="特殊"?"【连携场地："+ROLES[p.role.name].field+"】":"")+ROLES[p.role.name].s1+" ｜ "+ROLES[p.role.name].cb):""):""}</div>
       <div class="hand">${handHtml(p,isMe)}</div>
@@ -1694,7 +1784,7 @@ async function startGame(){
   if(meId!==state.hostId){ alert("只有房主可以开始游戏"); return; }
   if(state.order.length<1){ alert("至少需要1名玩家"); return; }
   // 用当前选择的场地组重建牌库（确保房主修改过牌库后生效）
-  const names=buildDeckNames(state.selectedGroups);
+  const names=buildDeckNames(state.selectedGroups,state.deckTrickCounts,state.deckEquipCounts);
   state.drawPile=names.map(makeCard);
   state.discardPile=[];
   state.status="playing";
