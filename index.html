@@ -51,7 +51,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v2.4</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v3.0</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showMusic()">🎵音乐</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -108,7 +108,19 @@ const ROLES = {
   "王球新":   {type:"role", atk:3, field:"教室", s1:"喝酒：下次攻击+2，但下一个自己的回合直接结束", cb:"连携：选择一名玩家判定，若为B则其下回合跳过"},
   "沈毅":     {type:"role", atk:3, field:"教室", s1:"上场时选择一名玩家交换手牌", cb:"连携：被攻击时不受锦囊和装备附加效果影响"},
   "李金仙":   {type:"role", atk:0, field:"教室", s1:"选择一名玩家受到他自己攻击力的伤害", cb:"连携：使用技能1后基础攻击力+1"},
-  "懂东方":   {type:"role", atk:3, field:"特殊", s1:"所有锦囊都可当作[校长出面]使用", cb:"无场地连携，5张专属牌在他手中效果增强"}
+  "懂东方":   {type:"role", atk:3, field:"特殊", s1:"所有锦囊都可当作[校长出面]使用", cb:"无场地连携，5张专属牌在他手中效果增强"},
+  // ===== Ave Mujica =====
+  "丰川祥子": {type:"role", atk:3, field:"Ave Mujica", s1:"切换白祥(攻3)/黑祥(攻1,可攻击两次)，开始为白祥，切换后本回合无法攻击", cb:"连携：不会被Ave Mujica角色攻击"},
+  "若叶睦":   {type:"role", atk:3, field:"Ave Mujica", s1:"血量>5时为墨提斯(攻3)，血量≤5时为若叶睦(攻1)", cb:"连携：墨提斯发动→到你下个回合所有玩家不能攻击；若叶睦发动→回5血"},
+  "三角初华": {type:"role", atk:3, field:"Ave Mujica", s1:"使一名玩家下回合不能切换角色；对若叶睦使用则若叶睦死亡，对丰川祥子使用则自己死亡", cb:"连携：使一名玩家下回合不能攻击"},
+  "八幡海玲": {type:"role", atk:5, field:"Ave Mujica", s1:"花1血上场，攻击后立即下场", cb:"连携：攻击后不会下场"},
+  "佑天寺若麦":{type:"role", atk:2, field:"Ave Mujica", s1:"回合开始时判定，A或B则随机使一名玩家扣2血", cb:"连携：使一个角色下场"},
+  // ===== MyGO!!!!! =====
+  "高松灯":   {type:"role", atk:1, field:"MyGO!!!!!", s1:"给一名玩家手牌加入一张不可弃的[石头]，使用石头扣2血", cb:"连携：基础攻击力变为3，所有玩家弹出图片+咕咕嘎嘎！"},
+  "千早爱音": {type:"role", atk:3, field:"MyGO!!!!!", s1:"扣1血，名字变为唐爱音，攻击力变为4", cb:"连携(需名为千早爱音)：名字变为神爱音，攻4，永久回合开始多抽1张"},
+  "长崎素世": {type:"role", atk:2, field:"MyGO!!!!!", s1:"给一名玩家回1血，但其下回合不能攻击使用者", cb:"连携：使一名玩家基础攻击力-2(不为负)"},
+  "要乐奈":   {type:"role", atk:3, field:"MyGO!!!!!", s1:"被动：攻击后，被攻击者下回合开始时扣1血", cb:"连携：使一名玩家扣2血，自己回2血"},
+  "椎名立希": {type:"role", atk:3, field:"MyGO!!!!!", s1:"选择一名玩家判定，若为C则其角色下场", cb:"连携：技能无需判定即可使用"}
 };
 const EQUIPS = {
   "手机":   {type:"equip", desc:"攻击力+1"},
@@ -116,7 +128,8 @@ const EQUIPS = {
   "顺手":   {type:"equip", desc:"攻击时判定A或C，可选被攻击玩家一张牌入手"},
   "脸皮":   {type:"equip", desc:"无视场地效果；装备时可装备给其他玩家"},
   "电子烟": {type:"equip", desc:"被攻击时，攻击者扣1点血"},
-  "权威":   {type:"equip", desc:"攻击力+1(懂东方装备时+2)"}
+  "权威":   {type:"equip", desc:"攻击力+1(懂东方装备时+2)"},
+  "乐器":   {type:"equip", desc:"受伤时回1血(Ave Mujica/MyGO!!!!!场地回2血)"}
 };
 const TRICKS = {
   "闪":         {type:"trick", desc:"被攻击时打出可闪避这次伤害(可不在自己回合)"},
@@ -133,15 +146,34 @@ const TRICKS = {
   "文艺汇演":   {type:"trick", desc:"直到你的下一回合，其他玩家无法攻击(懂东方：还无法出牌)"},
   "抢零食大会": {type:"trick", desc:"场地出现5血怪物叶亮(所有玩家可攻击)，打出者立即攻击怪物并回血(懂东方：直接回5血并生成怪物)"},
   "寻视":       {type:"trick", desc:"查看牌顶5张并调换顺序放回(懂东方：5张全部归其所有)"},
-  "发怒":       {type:"trick", desc:"下一次攻击攻击力+1(懂东方：+2)"}
+  "发怒":       {type:"trick", desc:"下一次攻击攻击力+1(懂东方：+2)"},
+  "春日影":     {type:"trick", desc:"播放春日影，场地变为Ave Mujica或MyGO!!!!!(从牌堆/弃牌堆取)，所有玩家获得一张对应角色牌"},
+  "前所未有之大变局": {type:"trick", desc:"从抽牌堆随机拿一张场地牌切换现有场地"},
+  "石头":       {type:"trick", desc:"不可被弃掉；使用后使用者扣2血"}
 };
 const FIELDS = {
   "厕所":       {type:"field", desc:"玩家回合结束时扣2点血"},
   "家":         {type:"field", desc:"所有玩家装备失效(优先级最高)"},
   "终焉之地":   {type:"field", desc:"回合结束时弃所有手牌并抽相同数量(最多3张)"},
   "寝室":       {type:"field", desc:"回合结束时若未攻击则回2点血"},
-  "教室":       {type:"field", desc:"回合结束时若未造成≥3点伤害则扣1点血"}
+  "教室":       {type:"field", desc:"回合结束时若未造成≥3点伤害则扣1点血"},
+  "Ave Mujica": {type:"field", desc:"除Ave Mujica角色外，所有角色牌及其技能无效"},
+  "MyGO!!!!!":  {type:"field", desc:"除MyGO!!!!!角色外，所有角色攻击时伤害-1"}
 };
+
+/* ============ 场地分组（自选牌库用） ============ */
+const FIELD_GROUPS = {
+  "厕所":     {field:"厕所", roles:["叶子绿","英真","陈天宝"], tricks:[], equips:[]},
+  "家":       {field:"家", roles:["姚九","徐睿","坤磊"], tricks:[], equips:[]},
+  "终焉之地": {field:"终焉之地", roles:["樊宇","威神代尔","唐炯"], tricks:[], equips:[]},
+  "寝室":     {field:"寝室", roles:["朱雍森","廖宇","相仿云飞"], tricks:[], equips:[]},
+  "教室":     {field:"教室", roles:["王球新","沈毅","李金仙"], tricks:[], equips:[]},
+  "懂东方":   {field:null, roles:["懂东方"], tricks:["文艺汇演","抢零食大会","寻视","发怒"], equips:["权威"]},
+  "Ave Mujica":{field:"Ave Mujica", roles:["丰川祥子","若叶睦","三角初华","八幡海玲","佑天寺若麦"], tricks:["春日影"], equips:["乐器","乐器"]},
+  "MyGO!!!!!":{field:"MyGO!!!!!", roles:["高松灯","千早爱音","长崎素世","要乐奈","椎名立希"], tricks:["春日影"], equips:["乐器","乐器"]}
+};
+// MyGO!!!!!和Ave Mujica必须同时选
+const LINKED_GROUPS = ["Ave Mujica", "MyGO!!!!!"];
 
 /* ============ 工具 ============ */
 let uid = ()=> Math.random().toString(36).slice(2,10);
@@ -150,17 +182,42 @@ function makeCard(name){ const d=ROLES[name]||{}; return {name, letter:"ABC"[Mat
 function cardInfo(c){ const d = ROLES[c.name]||EQUIPS[c.name]||TRICKS[c.name]||FIELDS[c.name]||{}; return d; }
 function cardType(c){ const d=cardInfo(c); return d.type||"trick"; }
 
-/* ============ 牌库构建(固定牌+随机补齐到51张) ============ */
-function buildDeckNames(){
+/* ============ 牌库构建(自选场地组+捆绑牌+随机补齐到51张) ============ */
+function buildDeckNames(selectedGroups){
+  if(!selectedGroups || !selectedGroups.length) selectedGroups = Object.keys(FIELD_GROUPS);
+  // 最多6组
+  if(selectedGroups.length>6) selectedGroups=selectedGroups.slice(0,6);
   let d=[];
-  Object.keys(ROLES).forEach(n=>d.push(n));        // 16角色
-  Object.keys(FIELDS).forEach(n=>d.push(n));       // 5场地
-  Object.keys(EQUIPS).forEach(n=>d.push(n));       // 6装备
-  ["闪","闪"].forEach(n=>d.push(n));               // 闪至少2张
-  Object.keys(TRICKS).forEach(n=>{ if(n!=="闪") d.push(n); }); // 其余锦囊各1
-  const dongEx=["权威","文艺汇演","抢零食大会","寻视","发怒"]; // 懂东方专属牌：至多1张(不再额外加，也不参与随机补牌)
-  const fill=[...Object.keys(EQUIPS),...Object.keys(TRICKS)].filter(n=>dongEx.indexOf(n)<0);
-  while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]); // 随机补到51
+  const usedRoles=new Set(), usedTricks=new Set();
+  const bundled=["春日影","前所未有之大变局","石头"];
+  const dongEx=["权威","文艺汇演","抢零食大会","寻视","发怒"];
+  // 公共牌：闪×2 + 前所未有之大变局×1
+  d.push("前所未有之大变局","闪","闪");
+  // 加入选中的组
+  selectedGroups.forEach(g=>{
+    const grp=FIELD_GROUPS[g]; if(!grp) return;
+    if(grp.field) d.push(grp.field);
+    grp.roles.forEach(r=>{ if(!usedRoles.has(r)){ d.push(r); usedRoles.add(r); } });
+    grp.tricks.forEach(t=>{ if(!usedTricks.has(t)){ d.push(t); usedTricks.add(t); } });
+    grp.equips.forEach(e=>{ d.push(e); });
+  });
+  // 普通锦囊/装备池（排除专属、捆绑、石头）
+  const normalTricks=Object.keys(TRICKS).filter(n=>n!=="闪"&&bundled.indexOf(n)<0&&dongEx.indexOf(n)<0&&!usedTricks.has(n));
+  const normalEquips=Object.keys(EQUIPS).filter(n=>dongEx.indexOf(n)<0&&n!=="乐器");
+  // 先每种普通牌加1张
+  normalTricks.forEach(n=>d.push(n));
+  normalEquips.forEach(n=>d.push(n));
+  // 如果超过51，随机删除普通牌（保留至少1张普通锦囊和1张普通装备）
+  const pool=[...normalTricks,...normalEquips];
+  while(d.length>51 && pool.length>2){
+    const idx=Math.floor(Math.random()*pool.length);
+    const name=pool.splice(idx,1)[0];
+    const di=d.indexOf(name);
+    if(di>=0) d.splice(di,1);
+  }
+  // 如果不足51，随机重复普通牌补到51
+  const fill=[...normalTricks,...normalEquips,"闪"];
+  while(d.length<51) d.push(fill[Math.floor(Math.random()*fill.length)]);
   return shuffle(d);
 }
 
@@ -249,7 +306,8 @@ const SONGS = [
  {name:"雨爱", src:"music/雨爱.mp3"},
 {name:"瞬（沈毅款）", src:"music/瞬（沈毅款）.mp3"},
  {name:"瞬", src:"music/瞬.mp3"},
-   {name:"春日影", src:"music/春日影.mp3"},
+ {name:"春日影", src:"music/春日影.mp3"},
+
   // 在这里继续加...
 ];
 let _curSong=-1, _musicPlaying=false;
@@ -317,10 +375,11 @@ async function pushState(){ // 新增房间用
 
 /* ============ 新游戏 ============ */
 function newGame(){
-  const names=buildDeckNames();
+  const selGroups=Object.keys(FIELD_GROUPS); // 默认全选
+  const names=buildDeckNames(selGroups);
   return {
     v:1, room, players:{}, order:[], turn:null, turnCount:0,
-    status:"waiting", hostId:null,
+    status:"waiting", hostId:null, selectedGroups:selGroups,
     field:null, fieldCooldown:0, drawPile:names.map(makeCard), discardPile:[],
     monster:null, pending:null, log:["房间已创建，等待房主开始游戏"]
   };
@@ -334,6 +393,16 @@ function comboActive(p){
   const need=ROLES[p.role.name]?ROLES[p.role.name].field:null;
   return !!(state.field && state.fieldCooldown<=0 && need && state.field.name===need);
 }
+// Ave Mujica场地：非Ave角色技能无效
+function aveSkillDisabled(p){
+  if(!state.field || state.field.name!=="Ave Mujica" || state.fieldCooldown>0) return false;
+  if(!p || !p.role) return false;
+  return ROLES[p.role.name] && ROLES[p.role.name].field!=="Ave Mujica";
+}
+// 是否为Ave Mujica角色
+function isAveRole(p){ return !!(p && p.role && ROLES[p.role.name] && ROLES[p.role.name].field==="Ave Mujica"); }
+// 是否为MyGO角色
+function isMygoRole(p){ return !!(p && p.role && ROLES[p.role.name] && ROLES[p.role.name].field==="MyGO!!!!!"); }
 function homeActive(){ return state.field && state.fieldCooldown<=0 && state.field.name==="家"; }
 function equipActive(p){ return !(homeActive() && !(p.equip&&p.equip.name==="脸皮")); }
 function fieldOn(){ return state.field && state.fieldCooldown<=0; }
@@ -371,7 +440,9 @@ function judge(byId){ // 判定：抽一张看右上角字母；樊宇在场时�
 }
 function discardHandAt(p,idx){
   if(idx<0||idx>=p.hand.length) return;
-  state.discardPile.push(p.hand[idx]); p.hand.splice(idx,1);
+  const c=p.hand[idx];
+  if(c.unthrowable){ addLog(p.name+"的【石头】不可被弃掉"); return; }
+  state.discardPile.push(c); p.hand.splice(idx,1);
 }
 function findInDiscard(name){ const i=state.discardPile.findIndex(c=>c.name===name); if(i>=0){const c=state.discardPile.splice(i,1)[0]; return c;} return null; }
 /* 自选弃牌请求：需要我先弃牌时返回true */
@@ -405,9 +476,18 @@ function discardByReq(i){
 /* 取角色当前攻击力(兼容旧数据没有atk字段的情况) */
 function roleAtk(p){
   if(!p || !p.role) return 0;
+  const n=p.role.name;
+  // 若叶睦：血量>5为墨提斯(攻3)，≤5为若叶睦(攻1)
+  if(n==="若叶睦") return p.hp>5?3:1;
+  // 丰川祥子：白祥攻3，黑祥攻1
+  if(n==="丰川祥子") return p.xiangziBlack?1:3;
+  // 千早爱音：唐爱音/神爱音攻4，千早爱音攻3
+  if(n==="千早爱音") return (p.aineForm==="唐爱音"||p.aineForm==="神爱音")?4:3;
+  // 高松灯连携后攻3
+  if(n==="高松灯" && p.tomoriCombo) return 3;
   const v=p.role.atk;
   if(v!==undefined && !isNaN(v)) return v;
-  return (ROLES[p.role.name]||{}).atk || 0;
+  return (ROLES[n]||{}).atk || 0;
 }
 /* 造成伤害并处理死亡 */
 function damage(p,d){
@@ -475,6 +555,10 @@ function calcAtk(p,target){
     a=roleAtk(p);
     if(p.role.name==="威神代尔"&&p.hp>5) a+=1;
   }
+  // MyGO!!!!!场地：除MyGO角色外攻击伤害-1
+  if(state.field && state.field.name==="MyGO!!!!!" && state.fieldCooldown<=0){
+    if(!(p.role && ROLES[p.role.name] && ROLES[p.role.name].field==="MyGO!!!!!")) a-=1;
+  }
   return Math.max(0,a);
 }
 
@@ -531,6 +615,12 @@ async function onPlayRole(p, card){
     const c=findInDiscard("手机");
     if(c){ p.hand.push(c); addLog(p.name+"从弃牌堆拿回一张手机"); }
   }
+  // ---- 八幡海玲：花1血上场 ----
+  if(card.name==="八幡海玲"){ damage(p,1); addLog("八幡海玲上场消耗1血"); }
+  // ---- 丰川祥子：初始白祥 ----
+  if(card.name==="丰川祥子"){ p.xiangziBlack=false; p.xiangziSwitchLock=true; addLog("丰川祥子以白祥形态上场(本回合无法切换/攻击)"); }
+  // ---- 若叶睦：初始按血量决定形态 ----
+  if(card.name==="若叶睦"){ addLog("若叶睦上场：当前"+(p.hp>5?"墨提斯(攻3)":"若叶睦(攻1)")+"形态"); }
   // ---- 角色上场音乐 ----
   if(ROLE_ENTER_SONG[card.name]) playSongByName(ROLE_ENTER_SONG[card.name]);
 }
@@ -599,6 +689,14 @@ async function attackAction(){
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色，无法攻击");return;}
   if(p.roleJustPlayed){alert("刚上场的角色本回合不能攻击");return;}
+  if(p.hasAttacked){alert("本回合已攻击过");return;}
+  // 三角初华连携：本回合不能攻击
+  if(p.noAttackNext){ alert("本回合不能攻击"); return; }
+  // 墨提斯连携：所有玩家不能攻击
+  for(const id in state.players){
+    const q=state.players[id];
+    if(q.noAttackUntil && q.noAttackTurn && state.turnCount<q.noAttackTurn){ alert("墨提斯连携中，所有玩家不能攻击"); return; }
+  }
   if(p.attackCount>=maxAttack(p)){alert("本回合不能再攻击");return;}
   // 文艺汇演：别人在场时你不能攻击
   for(const id in state.players){
@@ -615,17 +713,21 @@ async function attackAction(){
     }
     if(cho==null) return;
   }
-  // 选目标：玩家或怪物
-  const opts=Object.keys(state.players).map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+(state.players[id]===p?"(自己)":""),value:String(i+1)}));
+  // 选目标：玩家或怪物（长崎素世标记的目标不能选）
+  const opts=Object.keys(state.players).filter(id=>{
+    const q=state.players[id];
+    if(q===p) return false;
+    // 长崎素世：该玩家下回合不能攻击使用者
+    if(q.cannotAttackPlayer===meId && q.cannotAttackTurn && state.turnCount<=q.cannotAttackTurn) return false;
+    return true;
+  }).map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:state.players[id].id}));
   if(state.monster) opts.push({label:"怪物叶亮(HP "+state.monster.hp+")", value:"m"});
+  if(!opts.length){ alert("没有可攻击的目标"); return; }
   const t=await ask("选择攻击目标", opts);
   if(t==null) return;
   if(String(t).toLowerCase()==="m" && state.monster){ attackMonster(p); return; }
-  const ids=Object.keys(state.players);
-  const k=parseInt(t||"0")-1;
-  if(!ids[k]){alert("目标无效");return;}
-  const target=state.players[ids[k]];
-  if(target===p){alert("不能攻击自己");return;}
+  const target=state.players[t];
+  if(!target){alert("目标无效");return;}
   let dmg=calcAtk(p,target);
   state.pending={type:"attack", from:meId, to:target.id, dmg, atkName:p.role.name};
   p.attackCount=(p.attackCount||0)+1;
@@ -633,10 +735,11 @@ async function attackAction(){
   commitNow();
 }
 function maxAttack(p){
-  // 徐睿连携：可攻击两次；廖宇判定C可再攻击一次(由canAtkAgain标记)
   let m=1;
   if(p.role && p.role.name==="徐睿" && comboActive(p)) m=2;
   if(p.role && p.role.name==="廖宇" && p.canAtkAgain) m=2;
+  // 丰川祥子黑祥：一回合攻击两次
+  if(p.role && p.role.name==="丰川祥子" && p.xiangziBlack) m=2;
   return m;
 }
 function attackMonster(p, healBack){
@@ -656,6 +759,11 @@ function attackMonster(p, healBack){
 }
 // 攻击命中结算(目标已响应"承受"后调用)
 function resolveHit(from,target,dmg){
+  // 丰川祥子连携：不会被Ave Mujica角色攻击
+  if(target.role && target.role.name==="丰川祥子" && target.xiangziImmune && isAveRole(from)){
+    addLog("丰川祥子连携：免疫Ave Mujica角色的攻击"); dmg=0;
+  }
+  // 长崎素世：目标不能攻击使用者（在attackAction选目标时检查更合适，这里跳过）
   // 电子烟反伤
   if(target.equip && target.equip.name==="电子烟" && equipActive(target)){
     damage(from,1); addLog("电子烟反伤："+target.name+"使"+from.name+"扣1血");
@@ -687,6 +795,23 @@ function resolveHit(from,target,dmg){
     state.discardReq={fromId:from.id, need:[target.id], done:[]};
     addLog("朱雍森连携："+target.name+"需要弃一张牌");
   }
+  // 要乐奈被动：攻击后目标下回合开始扣1血
+  if(from.role && from.role.name==="要乐奈"){
+    target.yorunaDot=(target.yorunaDot||0)+1;
+    addLog("要乐奈被动："+target.name+"下回合开始将扣1血");
+  }
+  // 八幡海玲：攻击后立即下场（连携后不下场）
+  if(from.role && from.role.name==="八幡海玲" && !from.reiStay){
+    state.discardPile.push(from.role); from.role=null;
+    addLog("八幡海玲攻击后下场");
+  }
+  if(from.reiStay) from.reiStay=false;
+  // 乐器：受伤时回血
+  if(target.equip && target.equip.name==="乐器" && equipActive(target)){
+    const healAmt=(state.field && (state.field.name==="Ave Mujica"||state.field.name==="MyGO!!!!!") && state.fieldCooldown<=0)?2:1;
+    heal(target,healAmt);
+    addLog("乐器："+target.name+"受伤后回"+healAmt+"血");
+  }
   afterAttackHit(from,target);
 }
 function afterAttackHit(from,target){
@@ -703,6 +828,10 @@ async function skill1Action(){
   const p=me();
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色");return;}
+  // Ave Mujica场地：非Ave角色技能无效
+  if(aveSkillDisabled(p)){ alert("Ave Mujica场地中，非Ave角色技能无效"); return; }
+  // 三角初华：本回合不能切换角色
+  if(p.noSwitchNext && p.role.name==="丰川祥子"){ alert("本回合不能切换角色"); return; }
   const n=p.role.name;
   if(n==="王球新"){
     if(p.drunk){alert("已经在喝酒状态");return;}
@@ -737,6 +866,8 @@ async function comboAction(){
   if(state.turn!==meId){alert("不是你的回合");return;}
   if(!p.role){alert("没有角色");return;}
   if(p.role.name==="懂东方"){alert("懂东方没有场地连携");return;}
+  // Ave Mujica场地：非Ave角色连携无效
+  if(aveSkillDisabled(p)){ alert("Ave Mujica场地中，非Ave角色连携无效"); return; }
   if(!comboActive(p)){ alert("连携需要场地【"+(ROLES[p.role.name]?ROLES[p.role.name].field:"?")+"】在场"+(p.yingFreeCombo?"(英真本回合可无视场地)":"")); return; }
   const n=p.role.name;
   if(n==="叶子绿"){
@@ -792,10 +923,72 @@ async function comboAction(){
     p.shenCombo=true; addLog("沈毅连携：被攻击时不受锦囊/装备附加效果影响");
   }else if(n==="李金仙"){
     alert("李金仙连携为被动：使用技能1后基础攻击力+1(已集成在技能1里)");
+  }else if(n==="丰川祥子"){
+    p.xiangziImmune=true;
+    addLog("丰川祥子连携：不会被Ave Mujica角色攻击");
+  }else if(n==="若叶睦"){
+    if(p.hp>5){
+      // 墨提斯连携：到该玩家下个回合所有玩家不能攻击
+      for(const id in state.players){ state.players[id].noAttackUntil=p.id; state.players[id].noAttackTurn=state.turnCount+1; }
+      addLog("墨提斯连携：到"+p.name+"下个回合，所有玩家不能攻击");
+    } else {
+      // 若叶睦连携：回复5血
+      heal(p,5);
+      addLog("若叶睦连携：回复5点血");
+    }
+  }else if(n==="三角初华"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId && !state.players[id].dead);
+    const t=await ask("三角初华连携：选择目标，使其下回合不能攻击", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ state.players[ids[k]].noAttackNext=true; addLog(state.players[ids[k]].name+"下回合不能攻击"); }
+  }else if(n==="八幡海玲"){
+    p.reiStay=true;
+    addLog("八幡海玲连携：攻击后不会下场");
+  }else if(n==="佑天寺若麦"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId && state.players[id].role && !state.players[id].dead);
+    if(!ids.length){ alert("没有有角色的目标"); return; }
+    const t=await ask("佑天寺若麦连携：选择目标使其角色下场", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"("+state.players[id].role.name+")",value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ const q=state.players[ids[k]]; if(q.role){ state.discardPile.push(q.role); q.role=null; addLog("佑天寺若麦连携："+q.name+"的角色下场"); } }
+  }else if(n==="高松灯"){
+    p.tomoriCombo=true;
+    p.role.atk=3;
+    addLog("高松灯连携：基础攻击力变为3");
+    // 所有玩家弹出图片+咕咕嘎嘎
+    showGuguGaga();
+  }else if(n==="千早爱音"){
+    if(p.aineForm && p.aineForm!=="千早爱音"){ alert("连携必须在名为千早爱音时使用"); return; }
+    p.aineForm="神爱音";
+    p.role.atk=4;
+    p.aineExtraDraw=true;
+    addLog(p.name+"变为神爱音，攻4，永久回合开始多抽1张");
+  }else if(n==="长崎素世"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId && state.players[id].role && !state.players[id].dead);
+    const t=await ask("长崎素世连携：选择目标使其基础攻击力-2(不为负)", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name+"(攻"+roleAtk(state.players[id])+")",value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){
+      const q=state.players[ids[k]];
+      if(q.role){ q.role.atk=Math.max(0,roleAtk(q)-2); addLog(q.name+"基础攻击力变为"+q.role.atk); }
+    }
+  }else if(n==="要乐奈"){
+    const ids=Object.keys(state.players).filter(id=>id!==meId && !state.players[id].dead);
+    const t=await ask("要乐奈连携：选择目标扣2血，自己回2血", ids.map((id,i)=>({label:(i+1)+"号 "+state.players[id].name,value:String(i+1)})));
+    const k=parseInt(t||"0")-1;
+    if(ids[k]){ damage(state.players[ids[k]],2); heal(p,2); addLog("要乐奈连携："+state.players[ids[k]].name+"扣2血，"+p.name+"回2血"); }
+  }else if(n==="椎名立希"){
+    p.ritsukiCombo=true;
+    addLog("椎名立希连携：技能无需判定即可使用");
   }else{
     alert("该角色暂无主动连携操作");
   }
   commitNow();
+}
+
+// 高松灯连携：所有玩家弹出图片+咕咕嘎嘎
+function showGuguGaga(){
+  addLog("🐤 咕咕嘎嘎！");
+  // 在所有客户端显示（通过state标记，render时检测）
+  state.guguFlash=Date.now();
 }
 async function comboYao(p,why){
   // 姚九连携：扣自己1血，打别人3血（必须选目标，不能跳过）
@@ -888,6 +1081,54 @@ async function applyTrick(p,card){
       } else addLog("牌库不足5张");
     }
   }else if(n==="发怒"){ p.rage=isDong?2:1; addLog("发怒：下次攻击+"+(isDong?2:1)); }
+  else if(n==="春日影"){
+    // 播放春日影
+    playSongByName("春日影");
+    // 从抽牌堆或弃牌堆找Ave Mujica或MyGO!!!!!场地
+    let fieldCard=null;
+    const findField=arr=>{
+      for(let i=arr.length-1;i>=0;i--){ if(arr[i].name==="Ave Mujica"||arr[i].name==="MyGO!!!!!"){ return arr.splice(i,1)[0]; } }
+      return null;
+    };
+    fieldCard=findField(state.drawPile) || findField(state.discardPile);
+    if(fieldCard){
+      if(state.field) state.discardPile.push(state.field);
+      state.field=fieldCard;
+      addLog("春日影：场地变为【"+fieldCard.name+"】");
+    } else {
+      addLog("春日影：牌堆中没有Ave Mujica或MyGO!!!!!场地牌");
+    }
+    // 所有玩家获得一张Ave Mujica或MyGO!!!!!角色牌（随机，与场地无关）
+    const amRoles=["丰川祥子","若叶睦","三角初华","八幡海玲","佑天寺若麦"];
+    const mygoRoles=["高松灯","千早爱音","长崎素世","要乐奈","椎名立希"];
+    const allRoles=[...amRoles,...mygoRoles];
+    for(const id in state.players){
+      const q=state.players[id];
+      if(q.dead) continue;
+      const rn=allRoles[Math.floor(Math.random()*allRoles.length)];
+      q.hand.push(makeCard(rn));
+      addLog(q.name+"获得了角色牌【"+rn+"】");
+    }
+  }
+  else if(n==="前所未有之大变局"){
+    // 从抽牌堆随机拿一张场地牌切换现有场地
+    const fieldIdx=[];
+    state.drawPile.forEach((c,i)=>{ if(cardType(c)==="field") fieldIdx.push(i); });
+    if(fieldIdx.length){
+      const idx=fieldIdx[Math.floor(Math.random()*fieldIdx.length)];
+      const card=state.drawPile.splice(idx,1)[0];
+      if(state.field) state.discardPile.push(state.field);
+      state.field=card;
+      addLog("前所未有之大变局：场地变为【"+card.name+"】");
+    } else {
+      addLog("前所未有之大变局：抽牌堆中没有场地牌");
+    }
+  }
+  else if(n==="石头"){
+    // 石头使用后扣2血
+    damage(p,2);
+    addLog(p.name+"使用了石头，扣2血");
+  }
   else{ addLog("锦囊【"+n+"】已生效"); }
   commitNow();
 }
@@ -903,6 +1144,68 @@ function addAI(){
   if(state.status==="playing") draw(ai,4);
   addLog("房主添加了"+ai.name);
   commitNow();
+}
+/* ============ 自选牌库编辑器 ============ */
+let _deckSel=[]; // 临时选择
+function showDeckBuilder(){
+  if(!state || meId!==state.hostId){ alert("只有房主可以编辑牌库"); return; }
+  _deckSel=[...(state.selectedGroups||Object.keys(FIELD_GROUPS))];
+  renderDeckBuilder();
+}
+function renderDeckBuilder(){
+  document.getElementById("m_title").innerHTML="🃏 编辑牌库（最多6组，MyGO!!!!!与Ave Mujica必须同选）";
+  let h=`<div style="font-size:12px;color:#777;margin-bottom:8px">勾选要加入的场地组，相关角色和捆绑牌会自动加入。最终牌库固定51张。</div>`;
+  Object.keys(FIELD_GROUPS).forEach(g=>{
+    const grp=FIELD_GROUPS[g];
+    const checked=_deckSel.indexOf(g)>=0?"checked":"";
+    const fieldName=grp.field?grp.field:"(无场地)";
+    h+=`<label style="display:block;padding:6px;margin:3px 0;background:#f5f5f5;border-radius:6px;cursor:pointer">
+      <input type="checkbox" ${checked} onchange="toggleDeckGroup('${g}')" style="margin-right:6px">
+      <b>${g}</b> <span style="font-size:11px;color:#888">[${fieldName}] ${grp.roles.length}角色${grp.tricks.length?" +"+grp.tricks.length+"锦囊":""}${grp.equips.length?" +"+grp.equips.length+"装备":""}</span>
+    </label>`;
+  });
+  const cnt=_deckSel.length;
+  const names=buildDeckNames(_deckSel);
+  h+=`<div style="margin-top:10px;font-size:13px"><b>已选 ${cnt}/6 组</b> ｜ 牌库 ${names.length} 张</div>`;
+  h+=`<div style="display:flex;gap:8px;margin-top:10px">
+    <button class="btn green" onclick="confirmDeckBuilder()" style="flex:1">确认</button>
+    <button class="btn gray" onclick="modalCancel()" style="flex:1">取消</button>
+  </div>`;
+  document.getElementById("m_opts").innerHTML=h;
+  document.getElementById("modal").style.display="flex";
+}
+function toggleDeckGroup(g){
+  const i=_deckSel.indexOf(g);
+  if(i>=0){
+    _deckSel.splice(i,1);
+    // 取消Ave Mujica或MyGO!!!!!时，另一个也取消
+    if(LINKED_GROUPS.indexOf(g)>=0){
+      const other=LINKED_GROUPS.find(x=>x!==g);
+      const j=_deckSel.indexOf(other);
+      if(j>=0) _deckSel.splice(j,1);
+    }
+  } else {
+    if(_deckSel.length>=6){ alert("最多选6组"); return; }
+    _deckSel.push(g);
+    // 选Ave Mujica或MyGO!!!!!时，另一个也选
+    if(LINKED_GROUPS.indexOf(g)>=0){
+      const other=LINKED_GROUPS.find(x=>x!==g);
+      if(_deckSel.indexOf(other)<0) _deckSel.push(other);
+    }
+  }
+  renderDeckBuilder();
+}
+function confirmDeckBuilder(){
+  if(_deckSel.length<1){ alert("至少选1组"); return; }
+  if(_deckSel.length>6){ alert("最多6组"); return; }
+  state.selectedGroups=[..._deckSel];
+  // 重建牌库
+  const names=buildDeckNames(state.selectedGroups);
+  state.drawPile=names.map(makeCard);
+  state.discardPile=[];
+  addLog("房主修改了牌库："+_deckSel.join("、")+"（共"+names.length+"张）");
+  commitNow();
+  modalCancel();
 }
 async function aiTurn(){
   _aiAuto=true;
@@ -1203,7 +1506,8 @@ function render(){
       (meId===state.hostId)
         ? `<button class="btn green" onclick="startGame()">开始游戏（当前 ${state.order.length} 人）</button>
            <button class="btn blue" onclick="addAI()">🤖添加人机</button>
-           <span class="tip">你是房主，可添加人机凑人数，或等人到齐后点开始</span>`
+           <button class="btn" onclick="showDeckBuilder()">🃏编辑牌库</button>
+           <span class="tip">你是房主，可添加人机、编辑牌库，或等人到齐后点开始</span>`
         : `<span class="tip">已加入房间，等房主点“开始游戏”…</span>`;
     document.getElementById("selinfo").innerHTML="";
     document.getElementById("pending").style.display="none";
@@ -1286,6 +1590,15 @@ function render(){
   // 日志
   document.getElementById("log").innerHTML=state.log.slice(-40).map(x=>`<div>${esc(x)}</div>`).join("");
   document.getElementById("log").scrollTop=1e9;
+  // 高松灯连携：咕咕嘎嘎弹窗
+  if(state.guguFlash && !document.getElementById("guguoverlay")){
+    const ov=document.createElement("div");
+    ov.id="guguoverlay";
+    ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:98;display:flex;align-items:center;justify-content:center";
+    ov.innerHTML=`<div style="text-align:center"><img src="gugu.png" style="max-width:200px;border-radius:12px" onerror="this.style.display='none'"><div style="font-size:28px;font-weight:bold;color:#ff6b6b;margin-top:10px;text-shadow:2px 2px 4px #000">咕咕嘎嘎！</div><button class="btn green" style="margin-top:12px" onclick="document.getElementById('guguoverlay').remove()">关闭</button></div>`;
+    document.body.appendChild(ov);
+    setTimeout(()=>{ const e=document.getElementById("guguoverlay"); if(e) e.remove(); },4000);
+  }
   // 胜利弹窗(所有玩家都能看到)
   if(state.winner && !document.getElementById("winoverlay")){
     const ov=document.createElement("div");
@@ -1380,6 +1693,10 @@ async function startGame(){
   if(state.status!=="waiting") return;
   if(meId!==state.hostId){ alert("只有房主可以开始游戏"); return; }
   if(state.order.length<1){ alert("至少需要1名玩家"); return; }
+  // 用当前选择的场地组重建牌库（确保房主修改过牌库后生效）
+  const names=buildDeckNames(state.selectedGroups);
+  state.drawPile=names.map(makeCard);
+  state.discardPile=[];
   state.status="playing";
   state.turn=state.order[0];
   _winPlayed=false; // 新一局重置胜利音效
