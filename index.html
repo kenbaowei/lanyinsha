@@ -51,7 +51,7 @@ h1{font-size:22px;text-align:center;margin:8px 0;color:#7a4a21}
 </head>
 <body>
 <div class="wrap">
-<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v3.1</span>
+<h1>兰荫杀 · 联机测试版 <span style="font-size:12px;color:#c62828">v3.2</span>
 <span style="font-size:13px;margin-left:8px"><button class="btn" style="padding:2px 10px;font-size:12px" onclick="showRules()">📜规则</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showCards()">🃏卡牌</button> <button class="btn" style="padding:2px 10px;font-size:12px" onclick="showMusic()">🎵音乐</button></span></h1>
 <div class="bar" id="joinbar">
   房间号<input id="in_room" value="lanyin1" placeholder="房间号">
@@ -1449,12 +1449,19 @@ function turnBegin(p){
   addLog("—— "+p.name+" 的回合开始 ——");
   // 王球新喝酒的代价：本回合直接结束
   if(p.skipNextTurn){ p.skipNextTurn=false; addLog(p.name+"因喝酒代价，本回合直接结束"); endTurn(); return; }
+  // 三角初华连携：本回合不能攻击
+  if(p.noAttackNext){ p.noAttackNext=false; p.hasAttacked=true; addLog(p.name+"本回合不能攻击(三角初华连携)"); }
+  // 要乐奈被动：被攻击者下回合开始扣1血
+  if(p.yorunaDot>0){ damage(p,p.yorunaDot); addLog(p.name+"因要乐奈被动扣"+p.yorunaDot+"血"); p.yorunaDot=0; }
   p.hasAttacked=false; p.attackCount=0; p.canAtkAgain=false; p.dmgThisTurn=0; p.lijinUsed=false;
-  p.roleJustPlayed=false; // 过了自己的回合，角色可攻击了
+  p.roleJustPlayed=false;
   p.yingFreeCombo=false;
-  // 重置各角色"本回合有效"的连携激活标记(避免离开场地后效果残留)
   p.leafCombo=false; p.doubleAttack=false; p.kunHome=false; p.tangGuarded=false;
   p.zhuCombo=false; p.liaoCombo=false; p.xiangCombo=false; p.shenCombo=false; p.rage=0;
+  // 丰川祥子：切换锁重置（新回合可以切换形态）
+  if(p.role && p.role.name==="丰川祥子") p.xiangziSwitchLock=false;
+  // 三角初华技能：本回合不能切换角色（标记在回合开始时消耗）
+  if(p.noSwitchNext){ p.noSwitchNext=false; addLog(p.name+"本回合不能切换角色(三角初华技能)"); }
   if(p.artLock){ p.artLock=false; addLog(p.name+"的文艺汇演结束，其他人可恢复行动"); }
   if(p.invuln){ p.invuln=false; addLog(p.name+"的陈天宝铁壁到期解除"); }
   // 廖宇连携：其他玩家回合开始扣1血
@@ -1462,9 +1469,19 @@ function turnBegin(p){
     const q=state.players[id];
     if(q.role && q.role.name==="廖宇" && comboActive(q) && id!==p.id){ damage(p,1); addLog("廖宇连携："+p.name+"回合开始扣1血"); }
   }
+  // 佑天寺若麦：回合开始判定AB随机扣2血
+  if(p.role && p.role.name==="佑天寺若麦"){
+    const L=judge(p.id);
+    if(L==="A"||L==="B"){
+      const ids=Object.keys(state.players).filter(id=>!state.players[id].dead);
+      if(ids.length){ const q=state.players[ids[Math.floor(Math.random()*ids.length)]]; damage(q,2); addLog("佑天寺若麦判定"+L+"，随机使"+q.name+"扣2血"); }
+    }
+  }
   // 抽牌
   let n=1;
   if(p.equip && p.equip.name==="闹钟" && equipActive(p)) n++;
+  // 千早爱音神爱音：永久多抽1张
+  if(p.role && p.role.name==="千早爱音" && p.aineExtraDraw) n++;
   draw(p,n);
   addLog(p.name+"抽"+n+"张牌");
 }
@@ -1680,13 +1697,14 @@ function render(){
   // 日志
   document.getElementById("log").innerHTML=state.log.slice(-40).map(x=>`<div>${esc(x)}</div>`).join("");
   document.getElementById("log").scrollTop=1e9;
-  // 高松灯连携：咕咕嘎嘎弹窗
+  // 高松灯连携：咕咕嘎嘎弹窗（只弹一次，弹完清除标记）
   if(state.guguFlash && !document.getElementById("guguoverlay")){
     const ov=document.createElement("div");
     ov.id="guguoverlay";
     ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:98;display:flex;align-items:center;justify-content:center";
     ov.innerHTML=`<div style="text-align:center"><img src="gugu.png" style="max-width:200px;border-radius:12px" onerror="this.style.display='none'"><div style="font-size:28px;font-weight:bold;color:#ff6b6b;margin-top:10px;text-shadow:2px 2px 4px #000">咕咕嘎嘎！</div><button class="btn green" style="margin-top:12px" onclick="document.getElementById('guguoverlay').remove()">关闭</button></div>`;
     document.body.appendChild(ov);
+    state.guguFlash=null; // 清除标记，避免重复弹
     setTimeout(()=>{ const e=document.getElementById("guguoverlay"); if(e) e.remove(); },4000);
   }
   // 胜利弹窗(所有玩家都能看到)
